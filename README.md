@@ -97,12 +97,14 @@ npm run desktop
 ```
 
 The development app reads `.env` from the project root. In a packaged install,
-create `.env` in the app's user-data directory and set `DATABASE_TARGET`,
-`DATABASE_URL_LOCAL`, `DATABASE_URL_AIVEN`, and any desired authentication
-bootstrap settings there. The user-data directory is `%APPDATA%/hardwareops` on Windows,
+the build bundles the project-root `.env` and uses it by default. A `.env` in
+the app's user-data directory overrides the bundled configuration. The
+user-data directory is `%APPDATA%/hardwareops` on Windows,
 `~/Library/Application Support/hardwareops` on macOS, and
-`~/.config/hardwareops` on Linux. Do not distribute a populated `.env` file or
-commit database credentials.
+`~/.config/hardwareops` on Linux. The `.env` is included in the installer and
+installed app resources, so anyone who obtains either can extract its database
+credentials. Only distribute this build to trusted users; do not commit
+credentials, and rotate them if the installer is exposed.
 
 Build an installer/package for the current platform:
 

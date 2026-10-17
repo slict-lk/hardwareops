@@ -7,9 +7,11 @@ import { getDatabaseConfig } from "../database-config.js";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const userEnvPath = join(app.getPath("userData"), ".env");
-const envPath = existsSync(userEnvPath) || app.isPackaged
+const envPath = existsSync(userEnvPath)
   ? userEnvPath
-  : join(projectRoot, ".env");
+  : app.isPackaged
+    ? join(process.resourcesPath, ".env")
+    : join(projectRoot, ".env");
 dotenv.config({ path: envPath });
 
 let stopServer;

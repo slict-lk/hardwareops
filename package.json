@@ -29,6 +29,12 @@
       "!**/.env",
       "!**/.env.*"
     ],
+    "extraResources": [
+      {
+        "from": ".env",
+        "to": ".env"
+      }
+    ],
     "linux": {
       "category": "Office",
       "syncDesktopName": true,
