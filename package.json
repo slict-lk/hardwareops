@@ -1,0 +1,60 @@
+{
+  "name": "hardwareops",
+  "version": "1.0.0",
+  "description": "HardwareOps Optimizer desktop and web application",
+  "desktopName": "HardwareOps Optimizer",
+  "main": "electron/main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js",
+    "desktop": "electron .",
+    "dist": "electron-builder",
+    "dist:linux": "electron-builder --linux",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "build": {
+    "appId": "com.hardwareops.optimizer",
+    "productName": "HardwareOps Optimizer",
+    "files": [
+      "electron/**/*",
+      "index.html",
+      "server.js",
+      "database-config.js",
+      "package.json",
+      "!**/.env",
+      "!**/.env.*"
+    ],
+    "linux": {
+      "category": "Office",
+      "syncDesktopName": true,
+      "target": [
+        "AppImage"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    }
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.8",
+    "express": "^5.3.0",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "electron": "^38.2.0",
+    "electron-builder": "^26.0.12"
+  }
+}

@@ -1,0 +1,2790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HardwareOps Optimizer — Sales & Credit Analytics</title>
+<style>
+  :root {
+    --orange: #E67E22;
+    --dark: #1a1a1a;
+    --gray: #2a2a2a;
+    --light: #f5f5f5;
+    --border: #3a3a3a;
+    --green: #27ae60;
+    --red: #c0392b;
+    --yellow: #f39c12;
+    --blue: #3498db;
+    --gold: #D4A017;
+    --purple: #9b59b6;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--dark); color: var(--light); min-height: 100vh;
+  }
+  header {
+    background: var(--gray); border-bottom: 3px solid var(--orange);
+    padding: 16px 24px; display: flex; justify-content: space-between;
+    align-items: center; position: sticky; top: 0; z-index: 100;
+    flex-wrap: wrap; gap: 12px;
+  }
+  header h1 { font-size: 20px; letter-spacing: 0.5px; }
+  header h1 span { color: var(--orange); }
+  .header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .flag { font-size: 12px; color: #888; }
+
+  .user-chip {
+    display: flex; align-items: center; gap: 10px;
+    background: #1a1a1a; border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 12px; font-size: 12px;
+    transition: border-color 0.15s;
+  }
+  .user-chip .avatar {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: var(--orange); display: flex; align-items: center;
+    justify-content: center; font-weight: 700; font-size: 12px; color: white;
+  }
+  .user-chip .info { display: flex; flex-direction: column; line-height: 1.2; }
+  .user-chip .name { font-weight: 600; }
+  .user-chip .role { font-size: 10px; color: var(--purple); text-transform: uppercase; letter-spacing: 0.5px; }
+
+  .tax-toggle {
+    display: flex; align-items: center; gap: 10px;
+    background: #1a1a1a; border: 1px solid var(--border);
+    border-radius: 8px; padding: 6px 12px; font-size: 12px;
+  }
+  .tax-toggle .label {
+    text-transform: uppercase; letter-spacing: 1px;
+    color: #888; font-size: 10px;
+  }
+  .tax-toggle .value { color: var(--gold); font-weight: 700; font-size: 13px; }
+  .tax-toggle .value.off { color: #666; }
+
+  .switch {
+    position: relative; display: inline-block;
+    width: 44px; height: 24px;
+  }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background-color: #444; transition: 0.3s; border-radius: 24px;
+  }
+  .slider:before {
+    position: absolute; content: "";
+    height: 18px; width: 18px; left: 3px; bottom: 3px;
+    background-color: white; transition: 0.3s; border-radius: 50%;
+  }
+  input:checked + .slider { background-color: var(--gold); }
+  input:checked + .slider:before { transform: translateX(20px); }
+
+  nav {
+    display: flex; gap: 6px; flex-wrap: wrap;
+    padding: 12px 24px; background: var(--gray);
+    border-bottom: 1px solid var(--border);
+  }
+  nav button {
+    background: transparent; color: var(--light);
+    border: 1px solid var(--border); padding: 8px 14px;
+    border-radius: 6px; cursor: pointer; font-size: 13px; transition: all 0.15s;
+  }
+  nav button:hover { border-color: var(--orange); }
+  nav button.active {
+    background: var(--orange); border-color: var(--orange);
+    color: white; font-weight: 600;
+  }
+  nav button.denied { opacity: 0.35; cursor: not-allowed; }
+  nav button.denied:hover { border-color: var(--border); }
+  nav .divider { width: 1px; background: var(--border); margin: 0 6px; }
+  main { padding: 24px; max-width: 1400px; margin: 0 auto; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .panel h2 {
+    font-size: 22px; margin-bottom: 6px;
+    border-left: 4px solid var(--orange); padding-left: 12px;
+  }
+  .panel .sub { color: #888; margin-bottom: 24px; font-size: 13px; }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px; margin-bottom: 24px;
+  }
+  .kpi {
+    background: var(--gray); border: 1px solid var(--border);
+    border-radius: 8px; padding: 18px;
+  }
+  .kpi .label {
+    font-size: 11px; text-transform: uppercase; color: #888;
+    letter-spacing: 1px; margin-bottom: 6px;
+  }
+  .kpi .value { font-size: 22px; font-weight: 700; color: var(--orange); }
+  .kpi .value.green { color: var(--green); }
+  .kpi .value.red { color: var(--red); }
+  .kpi .value.yellow { color: var(--yellow); }
+  .kpi .value.blue { color: var(--blue); }
+  .kpi .value.gold { color: var(--gold); }
+  .kpi .value.purple { color: var(--purple); }
+  .kpi .meta { font-size: 12px; color: #666; margin-top: 4px; }
+
+  table {
+    width: 100%; border-collapse: collapse; background: var(--gray);
+    border-radius: 8px; overflow: hidden; font-size: 13px;
+  }
+  th, td {
+    padding: 10px 12px; text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    background: #1f1f1f; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.5px; color: #999;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #202020; }
+  .badge {
+    display: inline-block; padding: 3px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 600;
+  }
+  .badge.ok { background: rgba(39,174,96,0.2); color: var(--green); }
+  .badge.warn { background: rgba(243,156,18,0.2); color: var(--yellow); }
+  .badge.bad { background: rgba(192,57,43,0.2); color: var(--red); }
+  .badge.info { background: rgba(230,126,34,0.2); color: var(--orange); }
+  .badge.blue { background: rgba(52,152,219,0.2); color: var(--blue); }
+  .badge.gold { background: rgba(212,160,23,0.2); color: var(--gold); }
+  .badge.purple { background: rgba(155,89,182,0.2); color: var(--purple); }
+
+  .toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .toolbar input, .toolbar select {
+    background: var(--gray); border: 1px solid var(--border);
+    color: var(--light); padding: 8px 12px; border-radius: 6px;
+    font-size: 13px; font-family: inherit;
+  }
+  .toolbar input { flex: 1; min-width: 200px; }
+  .toolbar input:focus, .toolbar select:focus {
+    outline: none; border-color: var(--orange);
+  }
+
+  .form-row {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px; background: var(--gray); padding: 16px;
+    border-radius: 8px; border: 1px solid var(--border); margin-bottom: 16px;
+  }
+  .form-row label {
+    display: flex; flex-direction: column; gap: 4px;
+    font-size: 11px; text-transform: uppercase; color: #888;
+    letter-spacing: 0.5px;
+  }
+  .form-row input, .form-row select {
+    background: #1a1a1a; border: 1px solid var(--border);
+    color: var(--light); padding: 8px; border-radius: 4px;
+    font-size: 13px; font-family: inherit;
+  }
+  .btn {
+    background: var(--orange); color: white; border: none;
+    padding: 10px 18px; border-radius: 6px; cursor: pointer;
+    font-weight: 600; font-size: 13px; transition: opacity 0.15s;
+  }
+  .btn:hover { opacity: 0.85; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn.secondary {
+    background: transparent; color: var(--light);
+    border: 1px solid var(--border);
+  }
+  .btn.small { padding: 5px 10px; font-size: 11px; }
+  .btn.purple { background: var(--purple); }
+  .btn.danger { background: var(--red); }
+
+  .alert {
+    padding: 12px 16px; border-radius: 6px; margin-bottom: 12px;
+    border-left: 4px solid var(--orange);
+    background: rgba(230,126,34,0.1); font-size: 13px;
+  }
+  .alert.red { border-color: var(--red); background: rgba(192,57,43,0.1); }
+  .alert.green { border-color: var(--green); background: rgba(39,174,96,0.1); }
+  .alert.blue { border-color: var(--blue); background: rgba(52,152,219,0.1); }
+  .alert.gold { border-color: var(--gold); background: rgba(212,160,23,0.1); }
+  .alert.gray { border-color: #666; background: rgba(120,120,120,0.1); }
+  .alert.purple { border-color: var(--purple); background: rgba(155,89,182,0.1); }
+
+  .pos-wrap { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; }
+  .pos-products {
+    background: var(--gray); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px;
+  }
+  .pos-products input {
+    width: 100%; padding: 12px; background: #1a1a1a;
+    border: 1px solid var(--border); color: var(--light);
+    border-radius: 6px; font-size: 14px; margin-bottom: 12px;
+  }
+  .pos-products input:focus { outline: none; border-color: var(--orange); }
+  .pos-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px; max-height: 520px; overflow-y: auto;
+  }
+  .pos-item {
+    background: #1a1a1a; border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .pos-item:hover { border-color: var(--orange); background: #202020; }
+  .pos-item .sku { font-size: 10px; color: #666; font-family: monospace; }
+  .pos-item .name {
+    font-size: 12px; margin: 4px 0; line-height: 1.3;
+    height: 32px; overflow: hidden;
+  }
+  .pos-item .price { color: var(--orange); font-weight: 700; font-size: 13px; }
+
+  .pos-cart {
+    background: var(--gray); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px;
+    display: flex; flex-direction: column; height: fit-content;
+  }
+  .pos-cart h3 {
+    font-size: 14px; text-transform: uppercase; letter-spacing: 1px;
+    color: #888; margin-bottom: 12px;
+  }
+  .cart-items { max-height: 320px; overflow-y: auto; margin-bottom: 12px; }
+  .cart-line {
+    display: grid; grid-template-columns: 1fr auto auto;
+    gap: 8px; align-items: center; padding: 8px 0;
+    border-bottom: 1px solid var(--border); font-size: 13px;
+  }
+  .cart-line .qty { display: flex; align-items: center; gap: 4px; }
+  .cart-line .qty button {
+    background: #1a1a1a; border: 1px solid var(--border);
+    color: var(--light); width: 22px; height: 22px;
+    border-radius: 4px; cursor: pointer; font-size: 12px;
+  }
+  .cart-line .qty button:hover { border-color: var(--orange); }
+  .cart-line .del {
+    background: transparent; border: none; color: var(--red);
+    cursor: pointer; font-size: 14px;
+  }
+  .cart-totals { border-top: 2px solid var(--orange); padding-top: 12px; }
+  .cart-totals .row {
+    display: flex; justify-content: space-between;
+    font-size: 13px; padding: 4px 0;
+  }
+  .cart-totals .row.total {
+    font-size: 20px; font-weight: 700; color: var(--orange);
+    margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+  }
+  .cart-totals .row.tax-off { opacity: 0.5; }
+  .cart-totals .row.tax-off span:last-child { color: #666; }
+  .cart-empty { color: #666; text-align: center; padding: 30px; font-size: 13px; }
+
+  .master-tabs {
+    display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--border); padding-bottom: 12px;
+  }
+  .master-tabs button {
+    background: transparent; color: #888; border: none;
+    padding: 8px 14px; border-radius: 6px; cursor: pointer;
+    font-size: 13px; transition: all 0.15s;
+  }
+  .master-tabs button:hover { color: var(--light); background: #1f1f1f; }
+  .master-tabs button.active {
+    background: var(--orange); color: white; font-weight: 600;
+  }
+  .master-view { display: none; }
+  .master-view.active { display: block; }
+
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    display: none; align-items: center; justify-content: center;
+    z-index: 200; padding: 20px;
+  }
+  .modal-overlay.active { display: flex; }
+  .modal {
+    background: var(--gray); border: 1px solid var(--border);
+    border-radius: 12px; padding: 24px; max-width: 460px;
+    width: 100%; max-height: 90vh; overflow-y: auto;
+  }
+  .modal h3 { margin-bottom: 16px; font-size: 18px; }
+  .user-option {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px; border: 1px solid var(--border); border-radius: 8px;
+    margin-bottom: 8px; cursor: pointer; transition: all 0.15s;
+  }
+  .user-option:hover { border-color: var(--orange); background: #1f1f1f; }
+  .user-option.current { border-color: var(--purple); background: rgba(155,89,182,0.1); }
+  .user-option .avatar {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: var(--orange); display: flex; align-items: center;
+    justify-content: center; font-weight: 700; color: white;
+  }
+  .user-option .details { flex: 1; }
+  .user-option .details .n { font-weight: 600; font-size: 14px; }
+  .user-option .details .r { font-size: 11px; color: var(--purple); text-transform: uppercase; }
+
+  @media (max-width: 900px) {
+    .pos-wrap { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 700px) {
+    main { padding: 16px; }
+    header { padding: 12px 16px; }
+    nav { padding: 8px 16px; }
+    nav button { padding: 6px 10px; font-size: 12px; }
+    .tax-toggle { font-size: 11px; padding: 4px 8px; }
+  }
+
+  .toast {
+    position: fixed; bottom: 24px; right: 24px;
+    background: var(--gray); border-left: 4px solid var(--orange);
+    padding: 12px 18px; border-radius: 6px; z-index: 300;
+    font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    max-width: 380px;
+  }
+  .toast.err { border-color: var(--red); }
+  .toast.ok { border-color: var(--green); }
+  .login-screen {
+    min-height: 100vh; display: grid; place-items: center; padding: 24px;
+    background: radial-gradient(ellipse at top, #29231e 0, var(--dark) 60%);
+  }
+  [hidden] { display: none !important; }
+  .login-card {
+    width: min(100%, 420px); padding: 36px; background: var(--gray);
+    border: 1px solid var(--border); border-top: 3px solid var(--orange);
+    border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+  }
+  .login-card h1 { font-size: 25px; margin-bottom: 8px; }
+  .login-card h1 span { color: var(--orange); }
+  .login-card p { color: #999; font-size: 13px; margin-bottom: 24px; }
+  .login-card label {
+    display: flex; flex-direction: column; gap: 7px; margin-bottom: 16px;
+    color: #aaa; font-size: 11px; text-transform: uppercase; letter-spacing: 0.7px;
+  }
+  .login-card input {
+    width: 100%; padding: 12px; color: var(--light); background: #1a1a1a;
+    border: 1px solid var(--border); border-radius: 6px; font: inherit;
+    font-size: 14px; text-transform: none; letter-spacing: normal;
+  }
+  .login-card input:focus { outline: none; border-color: var(--orange); }
+  .login-card button { width: 100%; margin-top: 8px; padding: 12px; }
+  .login-error { min-height: 18px; margin: 0 0 12px !important; color: #e87569 !important; }
+  .login-note { margin: 20px 0 0 !important; font-size: 11px !important; line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<section class="login-screen" id="loginScreen">
+  <form class="login-card" id="loginForm">
+    <h1>Hardware<span>Ops</span></h1>
+    <p>Sign in to your HardwareOps workspace.</p>
+    <label for="loginEmail">Email
+      <input id="loginEmail" name="email" type="email" autocomplete="username" required>
+    </label>
+    <label for="loginPassword">Password
+      <input id="loginPassword" name="password" type="password" autocomplete="current-password" required>
+    </label>
+    <p class="login-error" id="loginError" role="alert" aria-live="polite"></p>
+    <button class="btn" id="loginSubmit" type="submit">Sign in</button>
+    <p class="login-note">First-time setup: the Owner password is configured by your administrator using <code>AUTH_BOOTSTRAP_PASSWORD</code>.</p>
+  </form>
+</section>
+
+<div id="appShell" hidden>
+<header>
+  <h1>Hardware<span>Ops</span> Optimizer</h1>
+  <div class="header-right">
+    <div class="flag">🇱🇰 SL · LKR</div>
+    <div class="tax-toggle">
+      <span class="label">VAT</span>
+      <label class="switch">
+        <input type="checkbox" id="taxToggle" checked>
+        <span class="slider"></span>
+      </label>
+      <span class="value" id="taxStatus">ON</span>
+    </div>
+    <div class="user-chip" id="userChip">
+      <div class="avatar" id="userAvatar">?</div>
+      <div class="info">
+        <div class="name" id="userName">Loading…</div>
+        <div class="role" id="userRole">—</div>
+      </div>
+    </div>
+    <button class="btn secondary small" id="signOutButton" type="button">Sign out</button>
+  </div>
+</header>
+
+<nav id="nav">
+  <button data-panel="dashboard">Dashboard</button>
+  <button data-panel="pos">POS</button>
+  <button data-panel="inventory">Inventory</button>
+  <button data-panel="po">Purchase Orders</button>
+  <button data-panel="grn">GRN</button>
+  <button data-panel="services">Services</button>
+  <button data-panel="rentals">Rentals</button>
+  <button data-panel="b2b">B2B / Credit</button>
+  <button data-panel="shrink">Shrinkage</button>
+  <button data-panel="gmroi">GMROI</button>
+  <button data-panel="analytics" style="border-left:2px solid var(--gold);margin-left:6px;padding-left:14px;">📊 Sales Analytics</button>
+  <div class="divider"></div>
+  <button data-panel="masters" style="border-color:var(--purple);color:var(--purple);">⚙ Masters</button>
+</nav>
+
+<main>
+
+  <section class="panel active" id="dashboard">
+    <h2>Owner Dashboard</h2>
+    <p class="sub">Live KPIs — LKR. Toggle VAT in header. Signed in as the active user.</p>
+    <div class="grid" id="kpiGrid"></div>
+    <div class="alert purple" id="alertRole"></div>
+    <div class="alert gray" id="alertTaxState"></div>
+    <div class="alert red" id="alertLowStock"></div>
+    <div class="alert" id="alertDeadStock"></div>
+    <div class="alert" id="alertOverdue"></div>
+    <div class="alert blue" id="alertPOs"></div>
+    <h3 style="margin:24px 0 12px;font-size:16px;">Low Stock Alerts</h3>
+    <div id="lowStockTable"></div>
+  </section>
+
+  <section class="panel" id="pos">
+    <h2>Point of Sale</h2>
+    <p class="sub">LKR · per-item tax · contractor discounts auto-applied.</p>
+    <div class="form-row">
+      <label>Customer
+        <select id="posCustomer"></select>
+      </label>
+      <label>Payment Method
+        <select id="posPayment">
+          <option>Cash</option>
+          <option>Card</option>
+          <option>Bank Transfer</option>
+          <option>Cheque</option>
+          <option>On Account (B2B)</option>
+        </select>
+      </label>
+      <label>Price Tier Override
+        <select id="posPriceTier">
+          <option value="">(Use customer default)</option>
+        </select>
+      </label>
+      <label>&nbsp;
+        <button class="btn secondary" id="posClear">Clear Cart</button>
+      </label>
+    </div>
+    <div class="pos-wrap">
+      <div class="pos-products">
+        <input id="posSearch" placeholder="🔍 Scan barcode or search SKU / name...">
+        <div class="pos-grid" id="posGrid"></div>
+      </div>
+      <div class="pos-cart">
+        <h3>Cart</h3>
+        <div class="cart-items" id="cartItems"></div>
+        <div class="cart-totals">
+          <div class="row"><span>Subtotal</span><span id="cartSubtotal">Rs 0.00</span></div>
+          <div class="row"><span>Discount</span><span id="cartDiscount">Rs 0.00</span></div>
+          <div class="row" id="taxRow"><span id="taxLabel">VAT</span><span id="cartTax">Rs 0.00</span></div>
+          <div class="row total"><span>Total</span><span id="cartTotal">Rs 0.00</span></div>
+        </div>
+        <button class="btn" style="width:100%;margin-top:12px;" id="posCheckout">Complete Sale</button>
+        <div id="posMsg" style="margin-top:10px;font-size:12px;"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel" id="inventory">
+    <h2>Inventory</h2>
+    <p class="sub">Item master with UOM, brand, tax, location.</p>
+    <div class="toolbar">
+      <input id="invSearch" placeholder="Search SKU or item name...">
+      <select id="invCat"><option value="">All Categories</option></select>
+      <select id="invStatus">
+        <option value="">All Status</option>
+        <option value="reorder">Needs Reorder</option>
+        <option value="dead">Dead Stock</option>
+        <option value="ok">Healthy</option>
+      </select>
+    </div>
+    <div id="invTable"></div>
+  </section>
+
+  <section class="panel" id="po">
+    <h2>Purchase Orders</h2>
+    <p class="sub">Auto-numbered PO-YYYY-#### series. Posted via API to Postgres.</p>
+    <div class="form-row">
+      <label>Supplier
+        <select id="poSupplier"></select>
+      </label>
+      <label>SKU
+        <select id="poSKU"></select>
+      </label>
+      <label>Qty (UOM)
+        <input type="number" id="poQty" value="10" min="1">
+      </label>
+      <label>Unit Cost (Rs)
+        <input type="number" id="poCost" step="0.01" value="0.00">
+      </label>
+      <label>&nbsp;
+        <button class="btn" id="poAdd">+ Add Line</button>
+      </label>
+    </div>
+    <div class="grid" id="poKpis"></div>
+    <div id="poDraft" style="margin-bottom:16px;"></div>
+    <div id="poTable"></div>
+  </section>
+
+  <section class="panel" id="grn">
+    <h2>Goods Received Notes</h2>
+    <p class="sub">Auto-numbered GRN-YYYY-####. Posting a GRN updates stock via DB trigger.</p>
+    <div class="grid" id="grnKpis"></div>
+    <div id="grnOpenPOs" style="margin-bottom:16px;"></div>
+    <div id="grnTable"></div>
+  </section>
+
+  <section class="panel" id="services">
+    <h2>Specialty Services</h2>
+    <div class="form-row">
+      <label>Service Type
+        <select id="svcType">
+          <option>Key_Cutting</option>
+          <option>Paint_Mix</option>
+          <option>Pipe_Threading</option>
+          <option>Screen_Repair</option>
+          <option>Welding_Work</option>
+        </select>
+      </label>
+      <label>Customer
+        <select id="svcCustomer"></select>
+      </label>
+      <label>Price (Rs)
+        <input type="number" id="svcPrice" value="500.00" step="0.01">
+      </label>
+      <label>Notes
+        <input type="text" id="svcNotes" placeholder="Optional">
+      </label>
+      <label>&nbsp;
+        <button class="btn" id="svcAdd">+ New Ticket</button>
+      </label>
+    </div>
+    <div id="svcTable"></div>
+  </section>
+
+  <section class="panel" id="rentals">
+    <h2>Tool Rentals</h2>
+    <div class="grid" id="rentalKpis"></div>
+    <div id="rentalTable"></div>
+  </section>
+
+  <section class="panel" id="b2b">
+    <h2>B2B Contractor Accounts</h2>
+    <div id="b2bTable"></div>
+    <h3 style="margin:24px 0 12px;font-size:16px;">Open Invoices</h3>
+    <div id="invoiceTable"></div>
+  </section>
+
+  <section class="panel" id="shrink">
+    <h2>Shrinkage Log</h2>
+    <div class="form-row">
+      <label>SKU
+        <select id="shrinkSKU"></select>
+      </label>
+      <label>Qty Lost
+        <input type="number" id="shrinkQty" value="1" min="1">
+      </label>
+      <label>Reason
+        <select id="shrinkReason">
+          <option>Theft</option>
+          <option>Damage</option>
+          <option>Miscount</option>
+          <option>Vendor_Short</option>
+          <option>Unknown</option>
+        </select>
+      </label>
+      <label>&nbsp;
+        <button class="btn" id="shrinkAdd">+ Log Incident</button>
+      </label>
+    </div>
+    <div class="grid" id="shrinkKpis"></div>
+    <div id="shrinkTable"></div>
+  </section>
+
+  <section class="panel" id="gmroi">
+    <h2>GMROI by Category</h2>
+    <div id="gmroiTable"></div>
+  </section>
+
+  <section class="panel" id="analytics">
+    <h2>📊 Sales & Cost Analytics</h2>
+    <p class="sub">Daily · Weekly · Monthly — served from Postgres analytics views.</p>
+
+    <div class="form-row">
+      <label>Period
+        <select id="anPeriod">
+          <option value="daily">Daily (Today)</option>
+          <option value="weekly" selected>Weekly (Last 7 Days)</option>
+          <option value="monthly">Monthly (Last 30 Days)</option>
+        </select>
+      </label>
+      <label>Date Reference
+        <input type="date" id="anDate" value="2026-10-15">
+      </label>
+      <label>View
+        <select id="anView">
+          <option value="items">Item Sales & Cost</option>
+          <option value="returns">Returns</option>
+          <option value="cashcredit">Cash vs Credit</option>
+          <option value="customercredit">Customer Credit</option>
+          <option value="supplierpurchases">Supplier Purchases</option>
+        </select>
+      </label>
+      <label>&nbsp;
+        <button class="btn" id="anRefresh">↻ Refresh</button>
+      </label>
+    </div>
+
+    <div class="grid" id="anKpis"></div>
+    <div id="anContent"></div>
+  </section>
+
+  <section class="panel" id="masters">
+    <h2>Master Data</h2>
+    <p class="sub">Core configuration. Click user chip to switch role — some masters are restricted.</p>
+
+    <div class="master-tabs">
+      <button data-master="suppliers" class="active">Suppliers</button>
+      <button data-master="categories">Categories</button>
+      <button data-master="items">Items</button>
+      <button data-master="customers">Customers</button>
+      <button data-master="uom">UOM</button>
+      <button data-master="tax">Tax Codes</button>
+      <button data-master="locations">Locations</button>
+      <button data-master="pricetiers">Price Tiers</button>
+      <button data-master="brands">Brands</button>
+      <button data-master="paymentterms">Payment Terms</button>
+      <button data-master="numberseries" style="border-left:2px solid var(--gold);margin-left:6px;padding-left:14px;">Number Series</button>
+      <button data-master="users" style="border-left:2px solid var(--purple);padding-left:14px;">Users & Roles</button>
+    </div>
+
+    <div class="master-view active" id="master-suppliers">
+      <div class="form-row">
+        <label>Supplier Name<input type="text" id="supName"></label>
+        <label>City<input type="text" id="supCity"></label>
+        <label>Lead Time (days)<input type="number" id="supLead" value="3"></label>
+        <label>Terms<select id="supTerms"></select></label>
+        <label>&nbsp;<button class="btn" id="supAdd">+ Add Supplier</button></label>
+      </div>
+      <div id="supTable"></div>
+    </div>
+
+    <div class="master-view" id="master-categories">
+      <div class="form-row">
+        <label>Category Code<input type="text" id="catCode"></label>
+        <label>Category Name<input type="text" id="catName"></label>
+        <label>Target Margin %<input type="number" id="catMargin" value="30"></label>
+        <label>&nbsp;<button class="btn" id="catAdd">+ Add Category</button></label>
+      </div>
+      <div id="catTable"></div>
+    </div>
+
+    <div class="master-view" id="master-items">
+      <div class="form-row">
+        <label>SKU<input type="text" id="itmSku"></label>
+        <label>Item Name<input type="text" id="itmName"></label>
+        <label>Category<select id="itmCat"></select></label>
+        <label>Brand<select id="itmBrand"></select></label>
+        <label>UOM<select id="itmUOM"></select></label>
+        <label>Tax Code<select id="itmTax"></select></label>
+        <label>Cost (Rs)<input type="number" id="itmCost" value="0"></label>
+        <label>Price (Rs)<input type="number" id="itmPrice" value="0"></label>
+        <label>Reorder Pt<input type="number" id="itmReorder" value="10"></label>
+        <label>Location<select id="itmLocation"></select></label>
+        <label>&nbsp;<button class="btn" id="itmAdd">+ Add Item</button></label>
+      </div>
+      <div id="itmTable"></div>
+    </div>
+
+    <div class="master-view" id="master-customers">
+      <div class="form-row">
+        <label>Name<input type="text" id="custName"></label>
+        <label>Type
+          <select id="custType">
+            <option>B2C_DIY</option>
+            <option>B2B_Contractor</option>
+            <option>B2B_Commercial</option>
+          </select>
+        </label>
+        <label>Credit Limit (Rs)<input type="number" id="custLimit" value="0"></label>
+        <label>Price Tier<select id="custTier"></select></label>
+        <label>Payment Terms<select id="custTerms"></select></label>
+        <label>&nbsp;<button class="btn" id="custAdd">+ Add Customer</button></label>
+      </div>
+      <div id="custTable"></div>
+    </div>
+
+    <div class="master-view" id="master-uom">
+      <div class="form-row">
+        <label>UOM Code<input type="text" id="uomCode"></label>
+        <label>UOM Name<input type="text" id="uomName"></label>
+        <label>Base UOM<select id="uomBase"><option value="">(Self — base)</option></select></label>
+        <label>Conversion Factor<input type="number" id="uomFactor" value="1" step="0.01"></label>
+        <label>Decimals<input type="number" id="uomDec" value="0" min="0" max="3"></label>
+        <label>&nbsp;<button class="btn" id="uomAdd">+ Add UOM</button></label>
+      </div>
+      <div id="uomTable"></div>
+    </div>
+
+    <div class="master-view" id="master-tax">
+      <div class="form-row">
+        <label>Tax Code<input type="text" id="taxCode"></label>
+        <label>Tax Name<input type="text" id="taxName"></label>
+        <label>Rate %<input type="number" id="taxRate" value="18" step="0.01"></label>
+        <label>IRD Code<input type="text" id="taxIRD"></label>
+        <label>&nbsp;<button class="btn" id="taxAdd">+ Add Tax Code</button></label>
+      </div>
+      <div id="taxTable"></div>
+    </div>
+
+    <div class="master-view" id="master-locations">
+      <div class="form-row">
+        <label>Location Code<input type="text" id="locCode"></label>
+        <label>Location Name<input type="text" id="locName"></label>
+        <label>Type
+          <select id="locType">
+            <option>Retail</option>
+            <option>Warehouse</option>
+            <option>Yard</option>
+            <option>Vehicle</option>
+            <option>Damage_Bin</option>
+          </select>
+        </label>
+        <label>&nbsp;<button class="btn" id="locAdd">+ Add Location</button></label>
+      </div>
+      <div id="locTable"></div>
+    </div>
+
+    <div class="master-view" id="master-pricetiers">
+      <div class="form-row">
+        <label>Tier Code<input type="text" id="tierCode"></label>
+        <label>Tier Name<input type="text" id="tierName"></label>
+        <label>Discount %<input type="number" id="tierDisc" value="0" step="0.1"></label>
+        <label>Applies To
+          <select id="tierApplies">
+            <option>B2C_DIY</option>
+            <option>B2B_Contractor</option>
+            <option>B2B_Commercial</option>
+          </select>
+        </label>
+        <label>&nbsp;<button class="btn" id="tierAdd">+ Add Tier</button></label>
+      </div>
+      <div id="tierTable"></div>
+    </div>
+
+    <div class="master-view" id="master-brands">
+      <div class="form-row">
+        <label>Brand Code<input type="text" id="brCode"></label>
+        <label>Brand Name<input type="text" id="brName"></label>
+        <label>Country<input type="text" id="brCountry"></label>
+        <label>Warranty (mo)<input type="number" id="brWarranty" value="12"></label>
+        <label>Distributor<input type="text" id="brDist"></label>
+        <label>&nbsp;<button class="btn" id="brAdd">+ Add Brand</button></label>
+      </div>
+      <div id="brTable"></div>
+    </div>
+
+    <div class="master-view" id="master-paymentterms">
+      <div class="form-row">
+        <label>Term Code<input type="text" id="ptCode"></label>
+        <label>Term Name<input type="text" id="ptName"></label>
+        <label>Days<input type="number" id="ptDays" value="30"></label>
+        <label>Early Disc %<input type="number" id="ptDisc" value="0" step="0.1"></label>
+        <label>Cheque?
+          <select id="ptCheque"><option value="yes">Yes</option><option value="no">No</option></select>
+        </label>
+        <label>&nbsp;<button class="btn" id="ptAdd">+ Add Term</button></label>
+      </div>
+      <div id="ptTable"></div>
+    </div>
+
+    <div class="master-view" id="master-numberseries">
+      <div class="alert gold">
+        <strong>Auto-increment series.</strong> Every PO, GRN, Sale, Invoice, and Service Ticket gets its next number from these counters in Postgres. Click <strong>Reset</strong> to restart, or <strong>+ Advance</strong> to skip.
+      </div>
+      <div id="nsTable"></div>
+    </div>
+
+    <div class="master-view" id="master-users">
+      <div class="alert purple">
+        <strong>Role-based access control.</strong> The signed-in account determines which tabs and actions are available. User managers can maintain accounts here; only the Owner can set account passwords.
+      </div>
+      <div class="form-row" id="userActions">
+        <label>&nbsp;<button class="btn" id="userAdd" type="button">+ Add User</button></label>
+      </div>
+      <div id="usrTable"></div>
+      <h3 style="margin:24px 0 12px;font-size:16px;">Permission Matrix</h3>
+      <div class="alert">
+        <em>Only the Owner can edit permissions.</em>
+      </div>
+      <div class="grid" id="roleKpis" style="margin-bottom:16px;"></div>
+      <div id="permMatrix"></div>
+    </div>
+
+  </section>
+
+</main>
+
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+/* ============================================================
+   API CLIENT
+   ============================================================ */
+const API = window.HARDWAREOPS_API || "http://localhost:4000";
+let sessionToken = sessionStorage.getItem("hardwareopsSession");
+
+async function api(path, opts = {}) {
+  const headers = { "Content-Type": "application/json", ...opts.headers };
+  if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
+  const res = await fetch(API + path, {
+    ...opts,
+    headers
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    let message = text || `HTTP ${res.status}`;
+    try { message = JSON.parse(text).error || message; } catch {}
+    const error = new Error(message);
+    error.status = res.status;
+    throw error;
+  }
+  return res.json();
+}
+
+function setLoginError(message) {
+  $("loginError").textContent = message;
+}
+
+$("loginForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const submit = $("loginSubmit");
+  submit.disabled = true;
+  setLoginError("");
+  try {
+    const credentials = new FormData(event.currentTarget);
+    const result = await api("/api/login", {
+      method: "POST",
+      body: JSON.stringify({
+        email: credentials.get("email"),
+        password: credentials.get("password")
+      })
+    });
+    sessionToken = result.token;
+    sessionStorage.setItem("hardwareopsSession", sessionToken);
+    await startApp();
+  } catch (err) {
+    setLoginError(err.status === 401 ? "Email or password is incorrect." : "Unable to sign in. Please try again.");
+  } finally {
+    submit.disabled = false;
+  }
+});
+
+$("signOutButton").addEventListener("click", async () => {
+  try { await api("/api/logout", { method: "POST" }); }
+  catch (err) { console.error("Sign out failed:", err); }
+  sessionStorage.removeItem("hardwareopsSession");
+  sessionToken = null;
+  $("appShell").hidden = true;
+  $("loginScreen").hidden = false;
+  $("loginForm").reset();
+  setLoginError("");
+});
+
+function toast(msg, kind = "ok") {
+  const el = document.createElement("div");
+  el.className = "toast " + kind;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3200);
+}
+
+/* ============================================================
+   GLOBAL STATE (cache of DB)
+   ============================================================ */
+let ROLES = {
+  Owner:       { name:"Owner",       color:"#9b59b6", desc:"Full access. Only role that can edit permissions." },
+  Manager:     { name:"Manager",     color:"#E67E22", desc:"Everything except user management and permission editing." },
+  Cashier:     { name:"Cashier",     color:"#3498db", desc:"POS, services, rentals only. No inventory or masters." },
+  Storekeeper: { name:"Storekeeper", color:"#27ae60", desc:"Inventory, PO, GRN, shrinkage. No POS or B2B credit." },
+  Accountant:  { name:"Accountant",  color:"#D4A017", desc:"Read-only financials. B2B, invoices, GMROI, reports." }
+};
+
+const PERMISSION_KEYS = [
+  "dashboard", "pos", "inventory", "po", "grn",
+  "services", "rentals", "b2b", "shrink", "gmroi", "analytics",
+  "masters", "masters_edit", "numberseries", "users_manage"
+];
+
+let rolePermissions = {};
+let users = [];
+let numberSeries = [];
+let uomMaster = [];
+let taxMaster = [];
+let categoryMaster = [];
+let locationMaster = [];
+let paymentTermsMaster = [];
+let priceTierMaster = [];
+let brandMaster = [];
+let supplierMaster = [];
+let inventory = [];
+let customers = [];
+let services = [];
+let rentals = [];
+let shrink = [];
+let invoices = [];
+let purchaseOrders = [];
+let grns = [];
+let posSales = [];
+
+let currentUserId = 0;
+let authenticatedUser = null;
+const currentUser = () => users.find(u => u.id === currentUserId) || { id:0, name:"Unknown", role:"Cashier", init:"?" };
+const can = (perm) => rolePermissions[currentUser().role]?.[perm] === true;
+
+/* ============================================================
+   HELPERS
+   ============================================================ */
+const today = new Date("2026-10-15");
+const money = n => "Rs " + Number(n || 0).toLocaleString('en-LK', {minimumFractionDigits:2, maximumFractionDigits:2});
+const daysBetween = (a, b) => Math.floor((new Date(b) - new Date(a)) / 86400000);
+const marginPct = it => ((it.price - it.cost) / it.price) * 100;
+const deadFlag = it => it.last_sold && daysBetween(it.last_sold, today) > 90;
+const lowFlag = it => Number(it.qty) <= Number(it.reorder);
+const getUOM = code => uomMaster.find(u => u.code === code);
+const getTax = code => taxMaster.find(t => t.code === code);
+const getTier = code => priceTierMaster.find(t => t.code === code);
+const getBrand = code => brandMaster.find(b => b.code === code);
+const getCategory = code => categoryMaster.find(c => c.code === code);
+const getTerms = code => paymentTermsMaster.find(t => t.code === code);
+
+function table(rows) {
+  if (!rows.length) return "";
+  const [head, ...body] = rows;
+  return `<table><thead><tr>${head.map(h=>`<th>${h}</th>`).join("")}</tr></thead>
+    <tbody>${body.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+}
+
+const MASTER_EDITORS = {
+  suppliers: {
+    endpoint: "suppliers", key: "id", records: () => supplierMaster,
+    fields: [
+      { key:"name", label:"Supplier Name" }, { key:"city", label:"City", nullable:true },
+      { key:"lead", label:"Lead Time (days)", type:"number", step:"1" },
+      { key:"terms", label:"Payment Terms", type:"select", nullable:true,
+        options: () => paymentTermsMaster.map(t => [t.code, t.name]) }
+    ]
+  },
+  categories: {
+    endpoint:"categories", key:"code", records:() => categoryMaster,
+    fields:[{key:"name",label:"Category Name"},{key:"margin",label:"Target Margin %",type:"number",step:"any"}]
+  },
+  items: {
+    endpoint:"items", key:"sku", records:() => inventory,
+    fields:[
+      {key:"name",label:"Item Name"}, {key:"cat",label:"Category",type:"select",nullable:true,
+        options:() => categoryMaster.map(c => [c.code, `${c.code} — ${c.name}`])},
+      {key:"brand",label:"Brand",type:"select",nullable:true,
+        options:() => brandMaster.map(b => [b.code, b.name])},
+      {key:"uom",label:"Unit of Measure",type:"select",nullable:true,
+        options:() => uomMaster.map(u => [u.code, `${u.code} — ${u.name}`])},
+      {key:"tax",label:"Tax Code",type:"select",nullable:true,
+        options:() => taxMaster.map(t => [t.code, t.name])},
+      {key:"cost",label:"Cost (Rs)",type:"number",step:"any"},
+      {key:"price",label:"Price (Rs)",type:"number",step:"any"},
+      {key:"reorder",label:"Reorder Point",type:"number",step:"1"},
+      {key:"location",label:"Location",type:"select",nullable:true,
+        options:() => locationMaster.map(l => [l.code, `${l.code} — ${l.name}`])},
+      {key:"supplier_id",label:"Supplier",type:"select",nullable:true,number:true,
+        options:() => supplierMaster.map(s => [s.id, s.name])}
+    ]
+  },
+  customers: {
+    endpoint:"customers", key:"id", records:() => customers,
+    fields:[
+      {key:"name",label:"Customer Name"},
+      {key:"type",label:"Customer Type",type:"select",options:() => [
+        ["B2C_DIY","B2C_DIY"],["B2B_Contractor","B2B_Contractor"],["B2B_Commercial","B2B_Commercial"]
+      ]},
+      {key:"tier",label:"Price Tier",type:"select",nullable:true,
+        options:() => priceTierMaster.map(t => [t.code, `${t.code} — ${t.name}`])},
+      {key:"limit",label:"Credit Limit (Rs)",type:"number",step:"any"},
+      {key:"terms",label:"Payment Terms",type:"select",nullable:true,
+        options:() => paymentTermsMaster.map(t => [t.code, t.name])}
+    ]
+  },
+  uoms: {
+    endpoint:"uoms", key:"code", records:() => uomMaster,
+    fields:[
+      {key:"name",label:"UOM Name"},
+      {key:"base",label:"Base UOM",type:"select",nullable:true,
+        options:() => uomMaster.map(u => [u.code, `${u.code} — ${u.name}`])},
+      {key:"factor",label:"Conversion Factor",type:"number",step:"any"},
+      {key:"dec",label:"Decimals",type:"number",step:"1"}
+    ]
+  },
+  "tax-codes": {
+    endpoint:"tax-codes", key:"code", records:() => taxMaster,
+    fields:[
+      {key:"name",label:"Tax Name"},{key:"rate",label:"Rate %",type:"number",step:"any"},
+      {key:"ird",label:"IRD Code",nullable:true}
+    ]
+  },
+  locations: {
+    endpoint:"locations", key:"code", records:() => locationMaster,
+    fields:[
+      {key:"name",label:"Location Name"},
+      {key:"type",label:"Location Type",type:"select",options:() => [
+        ["Retail","Retail"],["Warehouse","Warehouse"],["Yard","Yard"],
+        ["Vehicle","Vehicle"],["Damage_Bin","Damage_Bin"]
+      ]}
+    ]
+  },
+  "price-tiers": {
+    endpoint:"price-tiers", key:"code", records:() => priceTierMaster,
+    fields:[
+      {key:"name",label:"Tier Name"},{key:"disc",label:"Discount %",type:"number",step:"any"},
+      {key:"applies",label:"Applies To",type:"select",options:() => [
+        ["B2C_DIY","B2C_DIY"],["B2B_Contractor","B2B_Contractor"],["B2B_Commercial","B2B_Commercial"]
+      ]}
+    ]
+  },
+  brands: {
+    endpoint:"brands", key:"code", records:() => brandMaster,
+    fields:[
+      {key:"name",label:"Brand Name"},{key:"country",label:"Country",nullable:true},
+      {key:"warranty",label:"Warranty (months)",type:"number",step:"1"},
+      {key:"dist",label:"Distributor",nullable:true}
+    ]
+  },
+  "payment-terms": {
+    endpoint:"payment-terms", key:"code", records:() => paymentTermsMaster,
+    fields:[
+      {key:"name",label:"Term Name"},{key:"days",label:"Days",type:"number",step:"1"},
+      {key:"disc",label:"Early Discount %",type:"number",step:"any"},
+      {key:"cheque",label:"Cheque Accepted",type:"select",options:() => [["yes","Yes"],["no","No"]]}
+    ]
+  }
+};
+
+function masterActionCell(type, record) {
+  const definition = MASTER_EDITORS[type];
+  const id = encodeURIComponent(String(record[definition.key]));
+  return `<button class="btn" type="button" data-master-edit="${type}" data-master-id="${id}">Edit</button>
+    <button class="btn danger" type="button" data-master-delete="${type}" data-master-id="${id}">Delete</button>`;
+}
+
+function getMasterEditorDialog() {
+  let dialog = $("masterEditor");
+  if (dialog) return dialog;
+
+  dialog = document.createElement("dialog");
+  dialog.id = "masterEditor";
+  dialog.style.cssText = "width:min(560px,92vw);max-height:85vh;overflow:auto;padding:24px;border:1px solid #444;border-radius:10px;background:#171717;color:#eee";
+  document.body.appendChild(dialog);
+  return dialog;
+}
+
+async function editMasterRecord(type, encodedId) {
+  const definition = MASTER_EDITORS[type];
+  const id = decodeURIComponent(encodedId);
+  const record = definition.records().find(row => String(row[definition.key]) === id);
+  if (!record) {
+    toast("Master record was not found. Refresh and try again.", "err");
+    return;
+  }
+
+  const dialog = getMasterEditorDialog();
+  dialog.replaceChildren();
+  const title = document.createElement("h2");
+  title.textContent = `Edit ${type.replaceAll("-", " ")}`;
+  title.style.marginTop = "0";
+  dialog.appendChild(title);
+
+  const form = document.createElement("form");
+  form.method = "dialog";
+  form.style.cssText = "display:grid;gap:14px";
+  for (const field of definition.fields) {
+    const label = document.createElement("label");
+    label.textContent = field.label;
+    label.style.cssText = "display:grid;gap:6px;color:#ccc";
+    let input;
+    if (field.type === "select") {
+      input = document.createElement("select");
+      if (field.nullable) {
+        const empty = document.createElement("option");
+        empty.value = "";
+        empty.textContent = "— None —";
+        input.appendChild(empty);
+      }
+      for (const [value, text] of field.options()) {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = text;
+        input.appendChild(option);
+      }
+    } else {
+      input = document.createElement("input");
+      input.type = field.type || "text";
+      if (field.step) input.step = field.step;
+    }
+    input.name = field.key;
+    input.value = field.key === "cheque" ? (record.cheque ? "yes" : "no") : record[field.key] ?? "";
+    input.required = !field.nullable;
+    input.style.cssText = "padding:9px;border:1px solid #444;border-radius:5px;background:#222;color:#eee";
+    label.appendChild(input);
+    form.appendChild(label);
+  }
+
+  const buttons = document.createElement("div");
+  buttons.style.cssText = "display:flex;justify-content:flex-end;gap:8px;margin-top:8px";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "btn";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", () => dialog.close());
+  const save = document.createElement("button");
+  save.type = "submit";
+  save.className = "btn";
+  save.textContent = "Save Changes";
+  buttons.append(cancel, save);
+  form.appendChild(buttons);
+
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (!can("masters_edit")) {
+      toast("Permission denied", "err");
+      return;
+    }
+    save.disabled = true;
+    try {
+      const payload = Object.fromEntries(new FormData(form));
+      for (const field of definition.fields) {
+        if (field.number && payload[field.key] !== "") payload[field.key] = Number(payload[field.key]);
+      }
+      await api(`/api/${definition.endpoint}/${encodeURIComponent(id)}`, {
+        method:"PUT", body:JSON.stringify(payload)
+      });
+      dialog.close();
+      await refreshMasterData(type);
+      renderMastersDropdowns();
+      renderAll();
+      toast("Master record updated", "ok");
+    } catch (err) {
+      toast("Failed: " + err.message, "err");
+    } finally {
+      save.disabled = false;
+    }
+  });
+
+  dialog.appendChild(form);
+  dialog.showModal();
+}
+
+async function refreshMasterData(type) {
+  const definition = MASTER_EDITORS[type];
+  const records = await api(`/api/${definition.endpoint}`);
+  switch (type) {
+    case "suppliers": supplierMaster = records; break;
+    case "categories": categoryMaster = records; break;
+    case "items": inventory = records; break;
+    case "customers": customers = records; break;
+    case "uoms": uomMaster = records; break;
+    case "tax-codes": taxMaster = records; break;
+    case "locations": locationMaster = records; break;
+    case "price-tiers": priceTierMaster = records; break;
+    case "brands": brandMaster = records; break;
+    case "payment-terms": paymentTermsMaster = records; break;
+  }
+}
+
+document.addEventListener("click", async event => {
+  const editButton = event.target.closest("[data-master-edit]");
+  if (editButton) {
+    if (!can("masters_edit")) return toast("Permission denied", "err");
+    await editMasterRecord(editButton.dataset.masterEdit, editButton.dataset.masterId);
+    return;
+  }
+
+  const deleteButton = event.target.closest("[data-master-delete]");
+  if (!deleteButton) return;
+  if (!can("masters_edit")) return toast("Permission denied", "err");
+  const type = deleteButton.dataset.masterDelete;
+  const definition = MASTER_EDITORS[type];
+  const id = decodeURIComponent(deleteButton.dataset.masterId);
+  const record = definition.records().find(row => String(row[definition.key]) === id);
+  if (!record || !confirm(`Delete this ${type.replaceAll("-", " ")} record? This cannot be undone.`)) return;
+  try {
+    await api(`/api/${definition.endpoint}/${encodeURIComponent(id)}`, { method:"DELETE" });
+    await refreshMasterData(type);
+    renderMastersDropdowns();
+    renderAll();
+    toast("Master record deleted", "ok");
+  } catch (err) {
+    toast("Failed: " + err.message, "err");
+  }
+});
+
+/* ============================================================
+   BOOTSTRAP — load everything from API
+   ============================================================ */
+async function bootstrap() {
+  const [
+    permsData, usersData, nsData,
+    uoms, taxes, cats, locs, terms, tiers, brands, sups,
+    items, custs, svcs, rents, shr, invs, pos, grnList
+  ] = await Promise.all([
+    api("/api/permissions"),
+    api("/api/users"),
+    api("/api/number-series"),
+    api("/api/uoms"),
+    api("/api/tax-codes"),
+    api("/api/categories"),
+    api("/api/locations"),
+    api("/api/payment-terms"),
+    api("/api/price-tiers"),
+    api("/api/brands"),
+    api("/api/suppliers"),
+    api("/api/items"),
+    api("/api/customers"),
+    api("/api/services"),
+    api("/api/rentals"),
+    api("/api/shrink"),
+    api("/api/invoices"),
+    api("/api/purchase-orders"),
+    api("/api/grns")
+  ]);
+
+  rolePermissions     = permsData;
+  users               = usersData;
+  numberSeries        = nsData;
+  uomMaster           = uoms;
+  taxMaster           = taxes;
+  categoryMaster      = cats;
+  locationMaster      = locs;
+  paymentTermsMaster  = terms;
+  priceTierMaster     = tiers;
+  brandMaster         = brands;
+  supplierMaster      = sups;
+  inventory           = items;
+  customers           = custs;
+  services            = svcs;
+  rentals             = rents;
+  shrink              = shr;
+  invoices            = invs;
+  purchaseOrders      = pos.map(p => ({ ...p, lines: p.lines || [] }));
+  grns                = grnList.map(g => ({ ...g, lines: g.lines || [] }));
+
+  try { posSales = await api("/api/sales"); } catch { posSales = []; }
+
+  currentUserId = authenticatedUser.id;
+  if (can("users_manage")) users = await api("/api/users?includeInactive=true");
+
+  wireNav();
+  wireMastersTabs();
+
+  renderUserChip();
+  applyPermissions();
+  renderAll();
+}
+
+async function startApp() {
+  try {
+    authenticatedUser = await api("/api/me");
+    $("loginScreen").hidden = true;
+    $("appShell").hidden = false;
+    await bootstrap();
+  } catch (err) {
+    $("appShell").hidden = true;
+    $("loginScreen").hidden = false;
+    if (err.status === 401) {
+      sessionStorage.removeItem("hardwareopsSession");
+      sessionToken = null;
+      setLoginError("Please sign in to continue.");
+    } else {
+      setLoginError("Unable to connect to the HardwareOps service.");
+    }
+  }
+}
+
+async function refreshInventory()  { inventory      = await api("/api/items"); }
+async function refreshCustomers()  { customers      = await api("/api/customers"); }
+async function refreshInvoices()   { invoices       = await api("/api/invoices"); }
+async function refreshPOs()        { purchaseOrders = (await api("/api/purchase-orders")).map(p => ({...p, lines: p.lines||[]})); }
+async function refreshGRNs()       { grns           = (await api("/api/grns")).map(g => ({...g, lines: g.lines||[]})); }
+async function refreshNumberSeries(){ numberSeries  = await api("/api/number-series"); }
+
+function renderAll() {
+  renderDashboard();
+  renderPOS();
+  renderInventory();
+  renderPO();
+  renderGRN();
+  renderServices();
+  renderRentals();
+  renderB2B();
+  renderShrink();
+  renderGMROI();
+  renderSuppliers();
+  renderCategories();
+  renderItems();
+  renderCustomers();
+  renderUOM();
+  renderTax();
+  renderLocations();
+  renderTiers();
+  renderBrands();
+  renderPaymentTerms();
+  renderNumberSeries();
+  renderUsers();
+}
+
+/* ============================================================
+   CURRENT USER
+   ============================================================ */
+function renderUserChip() {
+  const u = currentUser();
+  $("userAvatar").textContent = u.init || "?";
+  $("userAvatar").style.background = ROLES[u.role]?.color || "#E67E22";
+  $("userName").textContent = u.name;
+  $("userRole").textContent = u.role;
+  $("userRole").style.color = ROLES[u.role]?.color || "#999";
+}
+
+/* ============================================================
+   PERMISSIONS
+   ============================================================ */
+function applyPermissions() {
+  const role = currentUser().role;
+  const perms = rolePermissions[role] || {};
+
+  document.querySelectorAll("#nav button").forEach(btn => {
+    const panel = btn.dataset.panel;
+    const allowed = perms[panel] === true || panel === "dashboard";
+    btn.classList.toggle("denied", !allowed);
+    btn.disabled = !allowed;
+  });
+
+  document.querySelectorAll(".master-tabs button").forEach(btn => {
+    const key = btn.dataset.master;
+    const needsEdit = ["suppliers","categories","items","customers","uom","tax","locations","pricetiers","brands","paymentterms"].includes(key);
+    const allowed = needsEdit ? perms.masters_edit : true;
+    const nsAllowed = key === "numberseries" ? perms.numberseries : true;
+    btn.classList.toggle("denied", !(allowed && nsAllowed));
+    btn.disabled = !(allowed && nsAllowed);
+  });
+
+  const activePanel = document.querySelector(".panel.active")?.id;
+  if (activePanel && perms[activePanel] !== true && activePanel !== "dashboard") {
+    document.querySelectorAll("#nav button").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+    document.querySelector('[data-panel="dashboard"]').classList.add("active");
+    $("dashboard").classList.add("active");
+  }
+}
+
+function renderRoleAlert() {
+  const u = currentUser();
+  const r = ROLES[u.role] || { color:"#999", desc:"" };
+  $("alertRole").innerHTML = `
+    <strong style="color:${r.color}">👤 ${u.name} — ${u.role}</strong><br>
+    <span style="color:#aaa;font-size:12px;">${r.desc}</span>
+  `;
+  $("alertRole").className = "alert purple";
+}
+
+/* ============================================================
+   TAX TOGGLE
+   ============================================================ */
+$("taxToggle").addEventListener("change", (e) => {
+  taxEnabled = e.target.checked;
+  $("taxStatus").textContent = taxEnabled ? "ON" : "OFF";
+  $("taxStatus").className = "value" + (taxEnabled ? "" : " off");
+  $("taxLabel").textContent = taxEnabled ? "VAT (per item)" : "VAT (disabled)";
+  $("taxRow").className = "row" + (taxEnabled ? "" : " tax-off");
+  renderCart();
+});
+let taxEnabled = true;
+
+/* ============================================================
+   NAV / MASTER TABS
+   ============================================================ */
+function wireNav() {
+  document.querySelectorAll("#nav button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (btn.disabled) return;
+      document.querySelectorAll("#nav button").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+      btn.classList.add("active");
+      $(btn.dataset.panel).classList.add("active");
+      window.scrollTo({top:0, behavior:"smooth"});
+      if (btn.dataset.panel === "analytics") renderAnalytics();
+    });
+  });
+}
+
+function wireMastersTabs() {
+  document.querySelectorAll(".master-tabs button").forEach(btn => {
+    btn.addEventListener("click", () => {
+      if (btn.disabled) return;
+      document.querySelectorAll(".master-tabs button").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".master-view").forEach(v => v.classList.remove("active"));
+      btn.classList.add("active");
+      $("master-" + btn.dataset.master).classList.add("active");
+    });
+  });
+}
+
+/* ============================================================
+   DASHBOARD
+   ============================================================ */
+function renderDashboard() {
+  renderRoleAlert();
+  const invValue = inventory.reduce((s, i) => s + Number(i.qty) * Number(i.cost), 0);
+  const retailValue = inventory.reduce((s, i) => s + Number(i.qty) * Number(i.price), 0);
+  const lowCount = inventory.filter(lowFlag).length;
+  const deadCount = inventory.filter(deadFlag).length;
+  const unpaid = invoices.filter(i => i.status !== "Paid");
+  const ar = unpaid.reduce((s, i) => s + Number(i.total), 0);
+  const openPOs = purchaseOrders.filter(p => p.status !== "Received" && p.status !== "Cancelled").length;
+  const todaySales = posSales.reduce((s, x) => s + Number(x.total), 0);
+  const vatCollected = posSales.reduce((s, x) => s + Number(x.tax || 0), 0);
+
+  $("kpiGrid").innerHTML = `
+    <div class="kpi"><div class="label">Inventory Value</div><div class="value">${money(invValue)}</div><div class="meta">${inventory.length} SKUs</div></div>
+    <div class="kpi"><div class="label">Retail Value</div><div class="value green">${money(retailValue)}</div><div class="meta">Potential revenue</div></div>
+    <div class="kpi"><div class="label">Sales (Cached)</div><div class="value blue">${money(todaySales)}</div><div class="meta">${posSales.length} transactions</div></div>
+    <div class="kpi"><div class="label">VAT Collected</div><div class="value gold">${money(vatCollected)}</div><div class="meta">${taxEnabled ? "Payable to IRD" : "Tax disabled"}</div></div>
+    <div class="kpi"><div class="label">Low Stock</div><div class="value ${lowCount>0?'yellow':'green'}">${lowCount}</div><div class="meta">Below reorder</div></div>
+    <div class="kpi"><div class="label">Dead Stock</div><div class="value ${deadCount>0?'red':'green'}">${deadCount}</div><div class="meta">90+ days</div></div>
+    <div class="kpi"><div class="label">Open POs</div><div class="value ${openPOs>0?'blue':'green'}">${openPOs}</div><div class="meta">Awaiting</div></div>
+    <div class="kpi"><div class="label">AR Outstanding</div><div class="value ${ar>0?'yellow':'green'}">${money(ar)}</div><div class="meta">${unpaid.length} invoices</div></div>
+  `;
+
+  $("alertTaxState").innerHTML = taxEnabled
+    ? `<strong>🧾 VAT ON.</strong> Per-item tax codes apply.`
+    : `<strong>🚫 VAT OFF.</strong> Sales recorded tax-free.`;
+  $("alertTaxState").className = "alert " + (taxEnabled ? "gold" : "gray");
+
+  $("alertLowStock").innerHTML = lowCount ? `<strong>⚠️ ${lowCount} SKUs need reorder.</strong>` : `<strong>✅ Stock healthy.</strong>`;
+  $("alertLowStock").className = "alert " + (lowCount ? "red" : "green");
+
+  $("alertDeadStock").innerHTML = deadCount ? `<strong>💀 ${deadCount} SKUs dead.</strong>` : `<strong>✅ No dead stock.</strong>`;
+  $("alertDeadStock").className = "alert " + (deadCount ? "" : "green");
+
+  $("alertOverdue").innerHTML = ar ? `<strong>💰 ${money(ar)} receivables.</strong>` : `<strong>✅ All paid.</strong>`;
+  $("alertOverdue").className = "alert " + (ar ? "" : "green");
+
+  $("alertPOs").innerHTML = openPOs ? `<strong>📦 ${openPOs} open POs.</strong>` : `<strong>✅ No pending POs.</strong>`;
+  $("alertPOs").className = "alert " + (openPOs ? "blue" : "green");
+
+  const low = inventory.filter(lowFlag);
+  $("lowStockTable").innerHTML = low.length ? table([
+    ["SKU","Item","Qty","Reorder","UOM","Supplier","Lead"],
+    ...low.map(i => [
+      i.sku, i.name, `<span class="badge bad">${i.qty}</span>`, i.reorder, i.uom,
+      i.supplier || "—",
+      (supplierMaster.find(s=>s.name===i.supplier)?.lead || "—") + " days"
+    ])
+  ]) : "<p style='color:#888;font-size:13px;'>No items below reorder point.</p>";
+}
+
+/* ============================================================
+   POS
+   ============================================================ */
+let cart = [];
+
+function renderPOS() {
+  const custSel = $("posCustomer");
+  custSel.innerHTML = `<option value="">Walk-in Customer</option>` +
+    customers.map(c => `<option value="${c.id}">${c.name} (${c.type})</option>`).join("");
+
+  const tierSel = $("posPriceTier");
+  tierSel.innerHTML = `<option value="">(Use customer default)</option>` +
+    priceTierMaster.map(t => `<option value="${t.code}">${t.code} — ${t.name} (${t.disc}%)</option>`).join("");
+
+  renderPOSGrid();
+  renderCart();
+}
+
+function renderPOSGrid() {
+  const q = $("posSearch").value.toLowerCase();
+  const rows = inventory.filter(i =>
+    !q || i.sku.toLowerCase().includes(q) || i.name.toLowerCase().includes(q)
+  );
+  $("posGrid").innerHTML = rows.map(i => `
+    <div class="pos-item" data-sku="${i.sku}">
+      <div class="sku">${i.sku} · ${i.uom}</div>
+      <div class="name">${i.name}</div>
+      <div class="price">${money(i.price)}</div>
+      <div style="font-size:10px;color:#666;margin-top:4px;">${i.location} · ${i.qty}</div>
+    </div>
+  `).join("");
+  document.querySelectorAll(".pos-item").forEach(el => el.addEventListener("click", () => addToCart(el.dataset.sku)));
+}
+
+function addToCart(sku) {
+  const item = inventory.find(i => i.sku === sku);
+  if (!item) return;
+  const line = cart.find(l => l.sku === sku);
+  if (line) line.qty++;
+  else cart.push({sku, qty:1, price:Number(item.price), name:item.name, tax:item.tax, uom:item.uom});
+  renderCart();
+}
+function removeFromCart(sku) { cart = cart.filter(l => l.sku !== sku); renderCart(); }
+function changeQty(sku, delta) {
+  const line = cart.find(l => l.sku === sku);
+  if (!line) return;
+  line.qty += delta;
+  if (line.qty <= 0) cart = cart.filter(l => l.sku !== sku);
+  renderCart();
+}
+function getActiveTier() {
+  const override = $("posPriceTier").value;
+  if (override) return getTier(override);
+  const custId = parseInt($("posCustomer").value) || 0;
+  const cust = customers.find(c => c.id === custId);
+  return cust ? getTier(cust.tier) : getTier("RETAIL");
+}
+
+function renderCart() {
+  if (!cart.length) {
+    $("cartItems").innerHTML = `<div class="cart-empty">Cart is empty.</div>`;
+  } else {
+    $("cartItems").innerHTML = cart.map(l => `
+      <div class="cart-line">
+        <div>
+          <div style="font-size:12px;">${l.name}</div>
+          <div style="font-size:10px;color:#666;font-family:monospace;">${l.sku} · ${l.uom} · ${l.tax}</div>
+        </div>
+        <div class="qty">
+          <button data-sku="${l.sku}" data-delta="-1">−</button>
+          <span style="min-width:20px;text-align:center;">${l.qty}</span>
+          <button data-sku="${l.sku}" data-delta="1">+</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <span style="color:var(--orange);font-weight:600;">${money(l.qty*l.price)}</span>
+          <button class="del" data-del="${l.sku}">✕</button>
+        </div>
+      </div>
+    `).join("");
+    document.querySelectorAll("[data-delta]").forEach(el => el.addEventListener("click", () => changeQty(el.dataset.sku, parseInt(el.dataset.delta))));
+    document.querySelectorAll("[data-del]").forEach(el => el.addEventListener("click", () => removeFromCart(el.dataset.del)));
+  }
+  const subtotal = cart.reduce((s, l) => s + l.qty * l.price, 0);
+  const tier = getActiveTier();
+  const discount = subtotal * ((tier?.disc || 0) / 100);
+  let tax = 0;
+  if (taxEnabled) {
+    cart.forEach(l => {
+      const taxRec = getTax(l.tax);
+      const lineBase = l.qty * l.price * (1 - (tier?.disc || 0) / 100);
+      tax += lineBase * ((taxRec?.rate || 0) / 100);
+    });
+  }
+  $("cartSubtotal").textContent = money(subtotal);
+  $("cartTax").textContent = money(tax);
+  $("cartDiscount").textContent = "-" + money(discount) + (tier ? ` (${tier.code})` : "");
+  $("cartTotal").textContent = money(subtotal - discount + tax);
+}
+
+$("posSearch").addEventListener("input", renderPOSGrid);
+$("posCustomer").addEventListener("change", renderCart);
+$("posPriceTier").addEventListener("change", renderCart);
+$("posClear").addEventListener("click", () => { cart = []; renderCart(); $("posMsg").textContent = ""; });
+
+$("posCheckout").addEventListener("click", async () => {
+  if (!can("pos")) { $("posMsg").innerHTML = `<span style="color:var(--red);">Permission denied.</span>`; return; }
+  if (!cart.length) { $("posMsg").innerHTML = `<span style="color:var(--red);">Cart empty.</span>`; return; }
+
+  const custId = parseInt($("posCustomer").value) || null;
+  const cust   = customers.find(c => c.id === custId);
+  const tier   = getActiveTier();
+  const payment = $("posPayment").value;
+
+  if (payment === "On Account (B2B)") {
+    if (!cust || cust.type === "B2C_DIY") {
+      $("posMsg").innerHTML = `<span style="color:var(--red);">On-account requires a B2B customer.</span>`;
+      return;
+    }
+  }
+
+  $("posMsg").innerHTML = `<span style="color:#888;">Posting…</span>`;
+
+  try {
+    const { id } = await api("/api/sales", {
+      method:"POST",
+      body: JSON.stringify({
+        customer_id: custId,
+        cashier_id: currentUser().id,
+        payment,
+        tier: tier?.code || "RETAIL",
+        tax_applied: taxEnabled,
+        lines: cart.map(l => ({ sku: l.sku, qty: l.qty, unit_price: l.price }))
+      })
+    });
+
+    await Promise.all([refreshInventory(), refreshCustomers(), refreshInvoices(), refreshPOs()]);
+    try { posSales = await api("/api/sales"); } catch {}
+
+    cart = [];
+    $("posMsg").innerHTML = `<span style="color:var(--green);">✅ ${id} posted · ${money(posSales[0]?.total || 0)}</span>`;
+    renderCart(); renderPOSGrid(); renderDashboard(); renderInventory(); renderB2B(); renderGMROI();
+    toast(`Sale ${id} posted`, "ok");
+    if (document.querySelector("#analytics.active")) renderAnalytics();
+  } catch (err) {
+    $("posMsg").innerHTML = `<span style="color:var(--red);">${err.message}</span>`;
+    toast("Sale failed: " + err.message, "err");
+  }
+});
+
+/* ============================================================
+   INVENTORY
+   ============================================================ */
+function renderInventory() {
+  const catSel = $("invCat");
+  if (catSel.options.length === 1) {
+    categoryMaster.forEach(c => {
+      const o = document.createElement("option"); o.value = c.code; o.textContent = c.name; catSel.appendChild(o);
+    });
+  }
+  const q = $("invSearch").value.toLowerCase();
+  const cat = $("invCat").value;
+  const status = $("invStatus").value;
+  const rows = inventory.filter(i => {
+    if (q && !(i.sku.toLowerCase().includes(q) || i.name.toLowerCase().includes(q))) return false;
+    if (cat && i.cat !== cat) return false;
+    if (status === "reorder" && !lowFlag(i)) return false;
+    if (status === "dead" && !deadFlag(i)) return false;
+    if (status === "ok" && (lowFlag(i) || deadFlag(i))) return false;
+    return true;
+  });
+  $("invTable").innerHTML = rows.length ? table([
+    ["SKU","Item","Category","Brand","UOM","Tax","Loc","Qty","Reorder","Cost","Price","Margin","Status"],
+    ...rows.map(i => {
+      const m = marginPct(i);
+      const mClass = m >= 35 ? "ok" : m >= 25 ? "warn" : "bad";
+      let badge = `<span class="badge ok">OK</span>`;
+      if (lowFlag(i)) badge = `<span class="badge bad">REORDER</span>`;
+      else if (deadFlag(i)) badge = `<span class="badge warn">DEAD</span>`;
+      return [
+        `<code>${i.sku}</code>`, i.name,
+        getCategory(i.cat)?.name || i.cat,
+        getBrand(i.brand)?.name || i.brand,
+        `<span class="badge purple">${i.uom}</span>`,
+        `<span class="badge gold">${i.tax}</span>`,
+        i.location, i.qty, i.reorder, money(i.cost), money(i.price),
+        `<span class="badge ${mClass}">${m.toFixed(1)}%</span>`, badge
+      ];
+    })
+  ]) : "<p style='color:#888;font-size:13px;'>No matching items.</p>";
+}
+$("invSearch").addEventListener("input", renderInventory);
+$("invCat").addEventListener("change", renderInventory);
+$("invStatus").addEventListener("change", renderInventory);
+
+/* ============================================================
+   PURCHASE ORDERS
+   ============================================================ */
+let draftPO = [];
+
+function renderPO() {
+  const supSel = $("poSupplier");
+  supSel.innerHTML = `<option value="">Select Supplier</option>` +
+    supplierMaster.map(s => `<option value="${s.id}">${s.name} — ${s.city || "—"}</option>`).join("");
+
+  const skuSel = $("poSKU");
+  skuSel.innerHTML = inventory.map(i =>
+    `<option value="${i.sku}" data-cost="${i.cost}">${i.sku} — ${i.name} (${i.uom})</option>`
+  ).join("");
+  skuSel.onchange = () => {
+    const opt = skuSel.options[skuSel.selectedIndex];
+    $("poCost").value = parseFloat(opt.dataset.cost).toFixed(2);
+  };
+  if (!skuSel.dataset.inited && skuSel.options.length) {
+    $("poCost").value = parseFloat(skuSel.options[0].dataset.cost).toFixed(2);
+    skuSel.dataset.inited = "1";
+  }
+
+  const open = purchaseOrders.filter(p => p.status !== "Received" && p.status !== "Cancelled");
+  const received = purchaseOrders.filter(p => p.status === "Received");
+  const openValue = open.reduce((s, p) => s + p.lines.reduce((x, l) => x + Number(l.qty) * Number(l.cost), 0), 0);
+
+  $("poKpis").innerHTML = `
+    <div class="kpi"><div class="label">Open POs</div><div class="value blue">${open.length}</div><div class="meta">Awaiting</div></div>
+    <div class="kpi"><div class="label">Open PO Value</div><div class="value">${money(openValue)}</div><div class="meta">Committed</div></div>
+    <div class="kpi"><div class="label">Received POs</div><div class="value green">${received.length}</div><div class="meta">Done</div></div>
+  `;
+
+  $("poDraft").innerHTML = draftPO.length ? `
+    <div class="alert blue">
+      <strong>Draft PO — ${$("poSupplier").selectedOptions[0]?.textContent || "No supplier"}</strong>
+      ${table([
+        ["SKU","Item","UOM","Qty","Unit Cost","Line Total"],
+        ...draftPO.map(l => {
+          const item = inventory.find(i => i.sku === l.sku);
+          return [l.sku, item?.name || "—", item?.uom || "—", l.qty, money(l.cost), money(l.qty * l.cost)];
+        }),
+        ["<strong>Total</strong>","","","","",`<strong>${money(draftPO.reduce((s,l)=>s+l.qty*l.cost,0))}</strong>`]
+      ])}
+      <div style="margin-top:10px;display:flex;gap:8px;">
+        <button class="btn" id="poSubmit">Submit PO</button>
+        <button class="btn secondary" id="poClearDraft">Clear Draft</button>
+      </div>
+    </div>
+  ` : "";
+
+  if ($("poSubmit")) {
+    $("poSubmit").onclick = async () => {
+      const supplierId = parseInt($("poSupplier").value);
+      if (!supplierId) { toast("Select supplier", "err"); return; }
+      try {
+        const { id } = await api("/api/purchase-orders", {
+          method:"POST",
+          body: JSON.stringify({
+            supplier_id: supplierId,
+            created_by: currentUser().id,
+            lines: draftPO
+          })
+        });
+        await refreshPOs();
+        draftPO = [];
+        renderPO(); renderDashboard();
+        toast(`PO ${id} submitted`, "ok");
+      } catch (err) { toast("PO failed: " + err.message, "err"); }
+    };
+  }
+  if ($("poClearDraft")) { $("poClearDraft").onclick = () => { draftPO = []; renderPO(); }; }
+
+  $("poTable").innerHTML = purchaseOrders.length ? table([
+    ["PO #","Supplier","Date","Expected","Lines","Total","Status","Action"],
+    ...purchaseOrders.map(p => {
+      const total = p.lines.reduce((s, l) => s + Number(l.qty) * Number(l.cost), 0);
+      const badge = {Draft:"warn",Sent:"blue",Partial:"info",Received:"ok",Cancelled:"bad"}[p.status] || "info";
+      const action = p.status === "Received" ? `<span style="color:#666;font-size:12px;">Closed</span>`
+        : `<button class="btn small" data-receive="${p.id}">Receive →</button>`;
+      return [`<code>${p.id}</code>`, p.supplier, p.date, p.expected || "—", p.lines.length, money(total), `<span class="badge ${badge}">${p.status}</span>`, action];
+    })
+  ]) : "<p style='color:#888;font-size:13px;'>No POs.</p>";
+
+  document.querySelectorAll("[data-receive]").forEach(el => {
+    el.onclick = () => {
+      const poId = el.dataset.receive;
+      document.querySelectorAll("#nav button").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+      document.querySelector('[data-panel="grn"]').classList.add("active");
+      $("grn").classList.add("active");
+      window.scrollTo({top:0, behavior:"smooth"});
+      setTimeout(() => {
+        const sel = $("grnPO");
+        if (sel) { sel.value = poId; }
+      }, 60);
+    };
+  });
+}
+
+$("poAdd").addEventListener("click", () => {
+  const sku = $("poSKU").value;
+  const qty = parseInt($("poQty").value) || 1;
+  const cost = parseFloat($("poCost").value) || 0;
+  const existing = draftPO.find(l => l.sku === sku);
+  if (existing) existing.qty += qty;
+  else draftPO.push({sku, qty, cost});
+  renderPO();
+});
+
+/* ============================================================
+   GRN
+   ============================================================ */
+function renderGRN() {
+  const open = purchaseOrders.filter(p => p.status !== "Received" && p.status !== "Cancelled");
+  const total = grns.length;
+  const value = grns.reduce((s, g) => s + g.lines.reduce((x, l) => x + Number(l.qty) * Number(l.cost), 0), 0);
+
+  $("grnKpis").innerHTML = `
+    <div class="kpi"><div class="label">GRNs Posted</div><div class="value green">${total}</div><div class="meta">Received</div></div>
+    <div class="kpi"><div class="label">Received Value</div><div class="value">${money(value)}</div><div class="meta">Cumulative</div></div>
+    <div class="kpi"><div class="label">Awaiting</div><div class="value ${open.length?'blue':'green'}">${open.length}</div><div class="meta">Open POs</div></div>
+  `;
+
+  $("grnOpenPOs").innerHTML = open.length ? `
+    <div class="form-row">
+      <label>Open PO
+        <select id="grnPO">
+          <option value="">Select PO...</option>
+          ${open.map(p => {
+            const total = p.lines.reduce((s, l) => s + Number(l.qty) * Number(l.cost), 0);
+            return `<option value="${p.id}">${p.id} — ${p.supplier} — ${money(total)}</option>`;
+          }).join("")}
+        </select>
+      </label>
+      <label>Received By<input type="text" id="grnBy" value="${currentUser().name}" readonly></label>
+      <label>Notes<input type="text" id="grnNotes"></label>
+      <label>&nbsp;<button class="btn" id="grnSubmit">✅ Receive & Post GRN</button></label>
+    </div>
+  ` : `<div class="alert green">All POs received.</div>`;
+
+  if ($("grnSubmit")) {
+    $("grnSubmit").onclick = async () => {
+      const poId = $("grnPO").value;
+      if (!poId) { toast("Select PO", "err"); return; }
+      try {
+        const { id } = await api("/api/grns", {
+          method:"POST",
+          body: JSON.stringify({
+            po_id: poId,
+            notes: $("grnNotes").value || null,
+            received_by: currentUser().id
+          })
+        });
+        await Promise.all([refreshGRNs(), refreshPOs(), refreshInventory()]);
+        renderGRN(); renderPO(); renderInventory(); renderDashboard(); renderGMROI();
+        toast(`GRN ${id} posted`, "ok");
+      } catch (err) { toast("GRN failed: " + err.message, "err"); }
+    };
+  }
+
+  $("grnTable").innerHTML = grns.length ? table([
+    ["GRN #","PO #","Supplier","Received","Lines","Value","Received By","Notes"],
+    ...grns.map(g => {
+      const val = g.lines.reduce((s, l) => s + Number(l.qty) * Number(l.cost), 0);
+      return [`<code>${g.id}</code>`, `<code>${g.poId}</code>`, g.supplier, g.dateReceived, g.lines.length, money(val), g.receivedBy || "—", g.notes || "—"];
+    })
+  ]) : "<p style='color:#888;font-size:13px;'>No GRNs.</p>";
+}
+
+/* ============================================================
+   SERVICES
+   ============================================================ */
+function renderServices() {
+  const sel = $("svcCustomer");
+  sel.innerHTML = customers.map(c => `<option value="${c.id}">${c.name}</option>`).join("");
+
+  $("svcTable").innerHTML = services.length ? table([
+    ["Ticket","Type","Customer","Date In","Status","Price","Notes"],
+    ...services.map(s => {
+      const statusBadge = {Pending:"warn",In_Progress:"info",Ready:"ok",Picked_Up:"ok"}[s.status] || "info";
+      return [`<code>${s.id}</code>`, s.type, s.customer, s.dateIn, `<span class="badge ${statusBadge}">${s.status}</span>`, money(s.price), s.notes || "—"];
+    })
+  ]) : "<p style='color:#888;font-size:13px;'>No tickets.</p>";
+}
+$("svcAdd").addEventListener("click", async () => {
+  if (!can("services")) { toast("Permission denied", "err"); return; }
+  try {
+    await api("/api/services", {
+      method:"POST",
+      body: JSON.stringify({
+        service_type: $("svcType").value,
+        customer_id: parseInt($("svcCustomer").value) || null,
+        price: parseFloat($("svcPrice").value) || 0,
+        notes: $("svcNotes").value
+      })
+    });
+    services = await api("/api/services");
+    $("svcNotes").value = "";
+    renderServices(); renderDashboard();
+    toast("Service ticket created", "ok");
+  } catch (err) { toast("Failed: " + err.message, "err"); }
+});
+
+/* ============================================================
+   RENTALS
+   ============================================================ */
+function renderRentals() {
+  const active = rentals.filter(r => !r.returned);
+  const overdue = active.filter(r => daysBetween(r.due, "2026-10-15") > 0);
+  $("rentalKpis").innerHTML = `
+    <div class="kpi"><div class="label">Active</div><div class="value">${active.length}</div><div class="meta">Out</div></div>
+    <div class="kpi"><div class="label">Overdue</div><div class="value ${overdue.length?'red':'green'}">${overdue.length}</div><div class="meta">Late</div></div>
+    <div class="kpi"><div class="label">Daily Rev</div><div class="value green">${money(active.reduce((s,r)=>s+Number(r.rate),0))}</div><div class="meta">From active</div></div>
+  `;
+  $("rentalTable").innerHTML = rentals.length ? table([
+    ["Rental #","Tool","Customer","Out","Due","Returned","Rate","Late Fee","Status"],
+    ...rentals.map(r => {
+      const isOverdue = !r.returned && daysBetween(r.due, "2026-10-15") > 0;
+      const lateFee = r.returned && daysBetween(r.due, r.returned) > 0 ? daysBetween(r.due, r.returned) * Number(r.rate) * 0.5 : 0;
+      const badge = r.returned ? `<span class="badge ok">Returned</span>` : isOverdue ? `<span class="badge bad">Overdue</span>` : `<span class="badge info">Out</span>`;
+      return [`<code>${r.id}</code>`, r.tool, r.customer, r.out, r.due, r.returned || "—", money(r.rate), lateFee ? `<span class="badge bad">${money(lateFee)}</span>` : "—", badge];
+    })
+  ]) : "";
+}
+
+/* ============================================================
+   B2B
+   ============================================================ */
+function renderB2B() {
+  const b2b = customers.filter(c => c.type !== "B2C_DIY");
+  $("b2bTable").innerHTML = b2b.length ? table([
+    ["Customer","Type","Tier","Terms","Limit","Used","Available","Util"],
+    ...b2b.map(c => {
+      const limit = Number(c.limit) || 0;
+      const used = Number(c.used) || 0;
+      const avail = limit - used;
+      const util = limit ? (used / limit) * 100 : 0;
+      const uClass = util > 80 ? "red" : util > 60 ? "warn" : "ok";
+      return [c.name, c.type, `<span class="badge purple">${c.tier}</span>`, `<span class="badge blue">${c.terms}</span>`,
+        money(limit), money(used), `<span class="badge ${avail>0?'ok':'bad'}">${money(avail)}</span>`,
+        `<span class="badge ${uClass}">${util.toFixed(0)}%</span>`];
+    })
+  ]) : "";
+
+  $("invoiceTable").innerHTML = invoices.length ? table([
+    ["Invoice","Customer","Date","Due","Total","Status"],
+    ...invoices.map(i => {
+      const overdue = i.status !== "Paid" && daysBetween(i.due, "2026-10-15") > 0;
+      const badge = i.status === "Paid" ? `<span class="badge ok">Paid</span>` : overdue ? `<span class="badge bad">Overdue</span>` : `<span class="badge warn">Unpaid</span>`;
+      return [`<code>${i.id}</code>`, i.customer, i.date, i.due, money(i.total), badge];
+    })
+  ]) : "";
+}
+
+/* ============================================================
+   SHRINK
+   ============================================================ */
+function renderShrink() {
+  const sel = $("shrinkSKU");
+  sel.innerHTML = inventory.map(i =>
+    `<option value="${i.sku}">${i.sku} — ${i.name}</option>`
+  ).join("");
+
+  const total = shrink.reduce((s, i) => s + Number(i.value), 0);
+  const theft = shrink.filter(s => s.reason === "Theft").reduce((s, i) => s + Number(i.value), 0);
+  $("shrinkKpis").innerHTML = `
+    <div class="kpi"><div class="label">Total Shrink</div><div class="value red">${money(total)}</div><div class="meta">${shrink.length} incidents</div></div>
+    <div class="kpi"><div class="label">Theft</div><div class="value red">${money(theft)}</div><div class="meta">${shrink.filter(s=>s.reason==="Theft").length} incidents</div></div>
+    <div class="kpi"><div class="label">Shrink Rate</div><div class="value ${total>50000?'red':'yellow'}">${((total/5000000)*100).toFixed(2)}%</div><div class="meta">vs. est. sales</div></div>
+  `;
+  $("shrinkTable").innerHTML = shrink.length ? table([
+    ["#","Date","SKU","Item","Qty","UOM","Reason","Dept","Value"],
+    ...shrink.map(s => {
+      return [`<code>${s.id}</code>`, s.date, s.sku, s.item || "—", s.qty, s.uom || "—",
+        `<span class="badge ${s.reason==='Theft'?'bad':'warn'}">${s.reason}</span>`, s.dept, money(s.value)];
+    })
+  ]) : "";
+}
+$("shrinkAdd").addEventListener("click", async () => {
+  if (!can("shrink")) { toast("Permission denied", "err"); return; }
+  try {
+    await api("/api/shrink", {
+      method:"POST",
+      body: JSON.stringify({
+        sku: $("shrinkSKU").value,
+        qty: parseInt($("shrinkQty").value) || 1,
+        reason: $("shrinkReason").value,
+        logged_by: currentUser().id
+      })
+    });
+    await Promise.all([api("/api/shrink").then(r => shrink = r), refreshInventory()]);
+    renderShrink(); renderDashboard();
+    toast("Shrink incident logged", "ok");
+  } catch (err) { toast("Failed: " + err.message, "err"); }
+});
+
+/* ============================================================
+   GMROI
+   ============================================================ */
+async function renderGMROI() {
+  let rows;
+  try { rows = await api("/api/analytics/gmroi"); }
+  catch { rows = []; }
+
+  const rendered = rows.map(r => {
+    const gmroi = Number(r.gmroi) || 0;
+    const margin = Number(r.retail_value) ? (Number(r.gross_margin) / Number(r.retail_value)) * 100 : 0;
+    const cls = gmroi >= 2 ? "ok" : gmroi >= 1.5 ? "warn" : "bad";
+    return [r.name, money(r.gross_margin), money(r.avg_inventory),
+      `<span class="badge ${cls}">${gmroi.toFixed(2)}</span>`,
+      `<span class="badge ${margin>=30?'ok':margin>=15?'warn':'bad'}">${margin.toFixed(1)}%</span>`,
+      `<span style="color:#666;font-size:11px;">retail ${money(r.retail_value)}</span>`];
+  });
+
+  const totalGM = rows.reduce((s, r) => s + Number(r.gross_margin), 0);
+  const totalInv = rows.reduce((s, r) => s + Number(r.avg_inventory), 0);
+  const overall = totalInv ? totalGM / totalInv : 0;
+
+  $("gmroiTable").innerHTML = rows.length ? table([
+    ["Category","Gross Margin","Avg Inventory","GMROI","Margin %","Notes"],
+    ...rendered,
+    ["<strong>Overall</strong>", money(totalGM), money(totalInv),
+     `<span class="badge ${overall>=2?'ok':overall>=1.5?'warn':'bad'}"><strong>${overall.toFixed(2)}</strong></span>`, "—", "—"]
+  ]) : "<p style='color:#888;font-size:13px;'>No inventory data.</p>";
+}
+
+/* ============================================================
+   ANALYTICS
+   ============================================================ */
+function periodRangeClient(period, ref) {
+  const d = new Date(ref);
+  if (period === "daily") return [d.toISOString().slice(0,10), d.toISOString().slice(0,10)];
+  if (period === "weekly") {
+    const day = d.getDay();
+    const mon = new Date(d); mon.setDate(d.getDate() - ((day+6)%7));
+    const sun = new Date(mon); sun.setDate(mon.getDate()+6);
+    return [mon.toISOString().slice(0,10), sun.toISOString().slice(0,10)];
+  }
+  const from = new Date(d.getFullYear(), d.getMonth(), 1);
+  const to   = new Date(d.getFullYear(), d.getMonth()+1, 0);
+  return [from.toISOString().slice(0,10), to.toISOString().slice(0,10)];
+}
+
+async function renderAnalytics() {
+  if (!can("analytics")) {
+    $("anKpis").innerHTML = `<div class="alert red">Permission denied for analytics.</div>`;
+    $("anContent").innerHTML = "";
+    return;
+  }
+  const period = $("anPeriod").value;
+  const refDate = $("anDate").value || "2026-10-15";
+  const view = $("anView").value;
+
+  let summary;
+  try {
+    summary = await api(`/api/analytics/summary?period=${period}&date=${refDate}`);
+  } catch (err) {
+    $("anKpis").innerHTML = `<div class="alert red">Analytics error: ${err.message}</div>`;
+    return;
+  }
+
+  const rangeLabel = `${summary.range.from} → ${summary.range.to}`;
+  const revenue = Number(summary.revenue) || 0;
+  const cost    = Number(summary.cost) || 0;
+  const gp      = Number(summary.gross_profit) || 0;
+  const margin  = revenue ? (gp / revenue) * 100 : 0;
+
+  $("anKpis").innerHTML = `
+    <div class="kpi"><div class="label">Period</div><div class="value blue" style="font-size:14px;">${rangeLabel}</div><div class="meta">${period.toUpperCase()}</div></div>
+    <div class="kpi"><div class="label">Total Revenue</div><div class="value">${money(revenue)}</div><div class="meta">${summary.transactions || 0} transactions</div></div>
+    <div class="kpi"><div class="label">Cost of Goods</div><div class="value red">${money(cost)}</div><div class="meta">Item cost × qty sold</div></div>
+    <div class="kpi"><div class="label">Gross Profit</div><div class="value green">${money(gp)}</div><div class="meta">Margin ${margin.toFixed(1)}%</div></div>
+    <div class="kpi"><div class="label">Items Sold</div><div class="value purple">${summary.items_sold || 0}</div><div class="meta">Total units</div></div>
+    <div class="kpi"><div class="label">Cash Sales</div><div class="value gold">${money(summary.cash_sales)}</div><div class="meta">Non-credit</div></div>
+    <div class="kpi"><div class="label">Credit Sales</div><div class="value yellow">${money(summary.credit_sales)}</div><div class="meta">On account</div></div>
+    <div class="kpi"><div class="label">Returns</div><div class="value red">${money(0)}</div><div class="meta">0 returns</div></div>
+  `;
+
+  if (view === "items") {
+    const rows = await api(`/api/analytics/items?period=${period}&date=${refDate}`);
+    $("anContent").innerHTML = rows.length ? table([
+      ["SKU","Item","UOM","Qty Sold","Revenue","Cost","Gross Profit","Margin %"],
+      ...rows.map(r => {
+        const rev = Number(r.revenue) || 0;
+        const gpLine = Number(r.gross_profit) || 0;
+        const m = rev ? (gpLine / rev) * 100 : 0;
+        const mCls = m >= 30 ? "ok" : m >= 15 ? "warn" : "bad";
+        return [`<code>${r.sku}</code>`, r.name, r.uom, r.qty, money(rev), money(r.cost),
+          money(gpLine), `<span class="badge ${mCls}">${m.toFixed(1)}%</span>`];
+      })
+    ]) : "<p style='color:#888;font-size:13px;'>No items sold in this period.</p>";
+  }
+  else if (view === "returns") {
+    $("anContent").innerHTML = "<p style='color:#888;font-size:13px;'>No returns recorded in this period.</p>";
+  }
+  else if (view === "cashcredit") {
+    const rows = await api(`/api/analytics/cash-credit?period=${period}&date=${refDate}`);
+    $("anContent").innerHTML = rows.length ? table([
+      ["Sale #","Date","Customer","Payment","Total","Items"],
+      ...rows.map(s => [`<code>${s.id}</code>`, s.date, s.customer,
+        `<span class="badge ${s.payment==="On Account (B2B)"?"yellow":"gold"}">${s.payment}</span>`,
+        money(s.total), s.items || 0])
+    ]) : "<p style='color:#888;font-size:13px;'>No sales in this period.</p>";
+  }
+  else if (view === "customercredit") {
+    const rows = await api("/api/analytics/customer-credit");
+    $("anContent").innerHTML = rows.length ? table([
+      ["Customer","Type","Limit","Used","Available","Unpaid","Status"],
+      ...rows.map(r => [r.name, r.type, money(r.credit_limit), money(r.credit_used),
+        money(r.available), money(r.unpaid_total),
+        `<span class="badge ${Number(r.unpaid_total)>0?'bad':'ok'}">${Number(r.unpaid_total)>0?'Outstanding':'Clear'}</span>`])
+    ]) : "<p style='color:#888;font-size:13px;'>No B2B customers.</p>";
+  }
+  else if (view === "supplierpurchases") {
+    const rows = await api("/api/analytics/supplier-purchases");
+    $("anContent").innerHTML = rows.length ? table([
+      ["Supplier","PO Count","Total Purchases","Received","Open"],
+      ...rows.map(r => [r.supplier, r.po_count, money(r.total_value), money(r.received_value), money(r.open_value)])
+    ]) : "<p style='color:#888;font-size:13px;'>No purchase orders.</p>";
+  }
+}
+
+$("anPeriod").addEventListener("change", renderAnalytics);
+$("anDate").addEventListener("change", renderAnalytics);
+$("anView").addEventListener("change", renderAnalytics);
+$("anRefresh").addEventListener("click", renderAnalytics);
+
+/* ============================================================
+   MASTERS
+   ============================================================ */
+function renderSuppliers() {
+  const tSel = $("supTerms");
+  if (tSel.options.length === 0) {
+    paymentTermsMaster.forEach(t => {
+      const o = document.createElement("option"); o.value = t.code; o.textContent = t.name; tSel.appendChild(o);
+    });
+  }
+  $("supTable").innerHTML = table([
+    ["Supplier","City","Lead","Terms","Items","Actions"],
+    ...supplierMaster.map(s => [s.name, s.city || "—", (s.lead || 0) + " days",
+      `<span class="badge blue">${s.terms || "—"}</span>`,
+      `<span class="badge info">${inventory.filter(i => i.supplier === s.name).length}</span>`,
+      masterActionCell("suppliers", s)])
+  ]);
+}
+$("supAdd").addEventListener("click", async () => {
+  if (!can("masters_edit")) { toast("Permission denied", "err"); return; }
+  const name = $("supName").value.trim();
+  if (!name) return;
+  try {
+    await api("/api/suppliers", {
+      method:"POST",
+      body: JSON.stringify({
+        name, city: $("supCity").value || null,
+        lead: parseInt($("supLead").value) || 3,
+        terms: $("supTerms").value
+      })
+    });
+    supplierMaster = await api("/api/suppliers");
+    $("supName").value=""; $("supCity").value="";
+    renderSuppliers(); renderPO();
+    toast("Supplier added", "ok");
+  } catch (err) { toast("Failed: " + err.message, "err"); }
+});
+
+function renderCategories() {
+  $("catTable").innerHTML = table([
+    ["Code","Name","Target Margin","Items","Actions"],
+    ...categoryMaster.map(c => [c.code, c.name, c.margin+"%",
+      `<span class="badge info">${inventory.filter(i=>i.cat===c.code).length}</span>`,
+      masterActionCell("categories", c)])
+  ]);
+}
+$("catAdd").addEventListener("click", async () => {
+  if (!can("masters_edit")) return;
+  const code = $("catCode").value.trim().toUpperCase();
+  const name = $("catName").value.trim();
+  if (!code || !name) return;
+  try {
+    await api("/api/categories", {
+      method:"POST",
+      body: JSON.stringify({ code, name, margin: parseInt($("catMargin").value) || 30 })
+    });
+    categoryMaster = await api("/api/categories");
+    $("catCode").value=""; $("catName").value="";
+    renderCategories(); renderMastersDropdowns();
+    toast("Category added", "ok");
+  } catch (err) { toast("Failed: " + err.message, "err"); }
+});
+
+function renderItems() {
+  const catSel = $("itmCat");
+  if (catSel.options.length === 0) {
+    categoryMaster.forEach(c => { const o = document.createElement("option"); o.value=c.code; o.textContent=`${c.code} — ${c.name}`; catSel.appendChild(o); });
+  }
+  const brandSel = $("itmBrand");
+  if (brandSel.options.length === 0) {
+    brandMaster.forEach(b => { const o = document.createElement("option"); o.value=b.code; o.textContent=b.name; brandSel.appendChild(o); });
+  }
+  const uomSel = $("itmUOM");
+  if (uomSel.options.length === 0) {
+    uomMaster.forEach(u => { const o = document.createElement("option"); o.value=u.code; o.textContent=u.code; uomSel.appendChild(o); });
+  }
+  const taxSel = $("itmTax");
+  if (taxSel.options.length === 0) {
+    taxMaster.forEach(t => { const o = document.createElement("option"); o.value=t.code; o.textContent=t.code; taxSel.appendChild(o); });
+  }
+  const locSel = $("itmLocation");
+  if (locSel.options.length === 0) {
+    locationMaster.forEach(l => { const o = document.createElement("option"); o.value=l.code; o.textContent=l.code; locSel.appendChild(o); });
+  }
+  $("itmTable").innerHTML = table([
+    ["SKU","Name","Cat","Brand","UOM","Tax","Loc","Cost","Price","Actions"],
+    ...inventory.map(i => [
+      `<code>${i.sku}</code>`, i.name, getCategory(i.cat)?.name || i.cat, getBrand(i.brand)?.name || i.brand,
+      `<span class="badge purple">${i.uom}</span>`, `<span class="badge gold">${i.tax}</span>`,
+      i.location, money(i.cost), money(i.price), masterActionCell("items", i)
+    ])
+  ]);
+}
+$("itmAdd").addEventListener("click", async () => {
+  if (!can("masters_edit")) return;
+  const sku = $("itmSku").value.trim();
+  const name = $("itmName").value.trim();
+  if (!sku || !name) return;
+  const supplierName = supplierMaster[0]?.name;
+  const supplierId = supplierMaster[0]?.id;
+  try {
+    await api("/api/items", {
+      method:"POST",
+      body: JSON.stringify({
+        sku, name,
+        cat: $("itmCat").value,
+        brand: $("itmBrand").value,
+        uom: $("itmUOM").value,
+        tax: $("itmTax").value,
+        cost: parseFloat($("itmCost").value) || 0,
+        price: parseFloat($("itmPrice").value) || 0,
+        reorder: parseInt($("itmReorder").value) || 10,
+        location: $("itmLocation").value,
+        supplier_id: supplierId || null
+      })
+    });
+    await refreshInventory();
+    $("itmSku").value=""; $("itmName").value="";
+    renderItems(); renderInventory(); renderPOSGrid(); renderDashboard();
+    toast("Item added", "ok");
+  } catch (err) { toast("Failed: " + err.message, "err"); }
+});
+
+function renderCustomers() {
+  const tierSel = $("custTier");
+  if (tierSel.options.length === 0) {
+    priceTierMaster.forEach(t => { const o = document.createElement("option"); o.value=t.code; o.textContent=`${t.code} — ${t.name}`; tierSel.appendChild(o); });
+  }
+  const termsSel = $("custTerms");
+  if (termsSel.options.length === 0) {
+    paymentTermsMaster.forEach(t => { const o = document.createElement("option"); o.value=t.code; o.textContent=t.name; termsSel.appendChild(o); });
+  }
+  $("custTable").innerHTML = table([
+    ["ID","Name","Type","Tier","Terms","Limit","Points","Actions"],
+    ...customers.map(c => [c.id, c.name, c.type, `<span class="badge purple">${c.tier}</span>`,
+      `<span class="badge blue">${c.terms}</span>`, money(c.limit), c.points || 0,
+      masterActionCell("customers", c)])
+  ]);
+}
+$("custAdd").addEventListener("click", async () => {
+  if (!can("masters_edit")) return;
+  const name = $("custName").value.trim();
+  if (!name) return;
+  try {
+    await api("/api/customers", {
+      method:"POST",
+      body: JSON.stringify({
+        name, type: $("custType").value,
+        tier: $("custTier").value,
+        limit: parseFloat($("custLimit").value) || 0,
+        terms: $("custTerms").value
+      })
+    });
+    await refreshCustomers();
+    $("custName").value="";
+    renderCustomers(); renderPOS(); renderB2B();
+    toast("Customer added", "ok");
+  } catch (err) { toast("Failed: " + err.message, "err"); }
+});
+
+function renderUOM() {
+  const baseSel = $("uomBase");
+  if (baseSel.options.length === 1) {
+    uomMaster.forEach(u => { const o = document.createElement("option"); o.value=u.code; o.textContent=`${u.code} — ${u.name}`; baseSel.appendChild(o); });
+  }
+  $("uomTable").innerHTML = table([
+    ["Code","Name","Base","Conv","Dec","Usage","Actions"],
+    ...uomMaster.map(u => [`<span class="badge purple">${u.code}</span>`, u.name,
+      u.base || "<em style='color:#666;'>base</em>", u.factor, u.dec,
+      `<span class="badge info">${inventory.filter(i=>i.uom===u.code).length}</span>`,
+      masterActionCell("uoms", u)])
+  ]);
+}
+$("uomAdd").addEventListener("click", async () => {
+  if (!can("masters_edit")) return;
+  const code = $("uomCode").value.trim().toUpperCase();
+  const name = $("uomName").value.trim();
+  if (!code || !name) return;
+  try {
+    await api("/api/uoms", {
+      method:"POST",
+      body: JSON.stringify({
+        code, name, base: $("uomBase").value || null,
+        factor: parseFloat($("uomFactor").value) || 1,
+        dec: parseInt($("uomDec").value) || 0
+      })
+    });
+    uomMaster = await api("/api/uoms");
+    $("uomCode").value=""; $("uomName").value="";
+    renderUOM(); renderMastersDropdowns();
+    toast("UOM added", "ok");
+  } catch (err) { toast("Failed: " + err.message, "err"); }
+});
+
+function renderTax() {
+  $("taxTable").innerHTML = table([
+    ["Code","Name","Rate","IRD","Items","Actions"],
+    ...taxMaster.map(t => [`<span class="badge gold">${t.code}</span>`, t.name, t.rate+"%", t.ird || "—",
+      `<span class="badge info">${inventory.filter(i=>i.tax===t.code).length}</span>`,
+      masterActionCell("tax-codes", t)])
+  ]);
+}
+$("taxAdd").addEventListener("click", async () => {
+  if (!can("masters_edit")) return;
+  const code = $("taxCode").value.trim().toUpperCase();
+  const name = $("taxName").value.trim();
+  if (!code || !name) return;
+  try {
+    await api("/api/tax-codes", {
+      method:"POST",
+      body: JSON.stringify({
+        code, name,
+        rate: parseFloat($("taxRate").value) || 0,
+        ird: $("taxIRD").value || null
+      })
+    });
+    taxMaster = await api("/api/tax-codes");
+    $("taxCode").value=""; $("taxName").value="";
+    renderTax(); renderMastersDropdowns();
+    toast("Tax code added", "ok");
+  } catch (err) { toast("Failed: " + err.message, "err"); }
+});
+
+function renderLocations() {
+  $("locTable").innerHTML = table([
+    ["Code","Name","Type","Items","Actions"],
+    ...locationMaster.map(l => [`<span class="badge blue">${l.code}</span>`, l.name, l.type,
+      `<span class="badge info">${inventory.filter(i=>i.location===l.code).length}</span>`,
+      masterActionCell("locations", l)])
+  ]);
+}
+$("locAdd").addEventListener("click", async () => {
+  if (!can("masters_edit")) return;
+  const code = $("locCode").value.trim().toUpperCase();
+  const name = $("locName").value.trim();
+  if (!code || !name) return;
+  try {
+    await api("/api/locations", {
+      method:"POST",
+      body: JSON.stringify({ code, name, type: $("locType").value })
+    });
+    locationMaster = await api("/api/locations");
+    $("locCode").value=""; $("locName").value="";
+    renderLocations(); renderMastersDropdowns();
+    toast("Location added", "ok");
+  } catch (err) { toast("Failed: " + err.message, "err"); }
+});
+
+function renderTiers() {
+  $("tierTable").innerHTML = table([
+    ["Code","Name","Disc %","Applies To","Customers","Actions"],
+    ...priceTierMaster.map(t => [`<span class="badge purple">${t.code}</span>`, t.name, t.disc+"%", t.applies,
+      `<span class="badge info">${customers.filter(c=>c.tier===t.code).length}</span>`,
+      masterActionCell("price-tiers", t)])
+  ]);
+}
+$("tierAdd").addEventListener("click", async () => {
+  if (!can("masters_edit")) return;
+  const code = $("tierCode").value.trim().toUpperCase();
+  const name = $("tierName").value.trim();
+  if (!code || !name) return;
+  try {
+    await api("/api/price-tiers", {
+      method:"POST",
+      body: JSON.stringify({
+        code, name,
+        disc: parseFloat($("tierDisc").value) || 0,
+        applies: $("tierApplies").value
+      })
+    });
+    priceTierMaster = await api("/api/price-tiers");
+    $("tierCode").value=""; $("tierName").value="";
+    renderTiers(); renderMastersDropdowns();
+    toast("Tier added", "ok");
+  } catch (err) { toast("Failed: " + err.message, "err"); }
+});
+
+function renderBrands() {
+  $("brTable").innerHTML = table([
+    ["Code","Brand","Country","Warranty","Distributor","Items","Actions"],
+    ...brandMaster.map(b => [`<span class="badge info">${b.code}</span>`, b.name, b.country || "—",
+      b.warranty ? b.warranty+" mo" : "—", b.dist || "—",
+      `<span class="badge info">${inventory.filter(i=>i.brand===b.code).length}</span>`,
+      masterActionCell("brands", b)])
+  ]);
+}
+$("brAdd").addEventListener("click", async () => {
+  if (!can("masters_edit")) return;
+  const code = $("brCode").value.trim().toUpperCase();
+  const name = $("brName").value.trim();
+  if (!code || !name) return;
+  try {
+    await api("/api/brands", {
+      method:"POST",
+      body: JSON.stringify({
+        code, name,
+        country: $("brCountry").value || null,
+        warranty: parseInt($("brWarranty").value) || 0,
+        dist: $("brDist").value || null
+      })
+    });
+    brandMaster = await api("/api/brands");
+    $("brCode").value=""; $("brName").value="";
+    renderBrands(); renderMastersDropdowns();
+    toast("Brand added", "ok");
+  } catch (err) { toast("Failed: " + err.message, "err"); }
+});
+
+function renderPaymentTerms() {
+  $("ptTable").innerHTML = table([
+    ["Code","Term","Days","Early Disc","Cheque","Usage","Actions"],
+    ...paymentTermsMaster.map(t => {
+      const custCount = customers.filter(c => c.terms === t.code).length;
+      const supCount = supplierMaster.filter(s => s.terms === t.code).length;
+      return [`<span class="badge blue">${t.code}</span>`, t.name, t.days, t.disc+"%",
+        t.cheque === true || t.cheque === "yes" ? "✅" : "❌",
+        `<span class="badge info">${custCount}C · ${supCount}S</span>`,
+        masterActionCell("payment-terms", t)];
+    })
+  ]);
+}
+$("ptAdd").addEventListener("click", async () => {
+  if (!can("masters_edit")) return;
+  const code = $("ptCode").value.trim().toUpperCase();
+  const name = $("ptName").value.trim();
+  if (!code || !name) return;
+  try {
+    await api("/api/payment-terms", {
+      method:"POST",
+      body: JSON.stringify({
+        code, name,
+        days: parseInt($("ptDays").value) || 0,
+        disc: parseFloat($("ptDisc").value) || 0,
+        cheque: $("ptCheque").value
+      })
+    });
+    paymentTermsMaster = await api("/api/payment-terms");
+    $("ptCode").value=""; $("ptName").value="";
+    renderPaymentTerms(); renderMastersDropdowns();
+    toast("Payment term added", "ok");
+  } catch (err) { toast("Failed: " + err.message, "err"); }
+});
+
+/* ============================================================
+   NUMBER SERIES VIEW
+   ============================================================ */
+function renderNumberSeries() {
+  $("nsTable").innerHTML = table([
+    ["Code","Description","Prefix","Year","Next #","Preview","Actions"],
+    ...numberSeries.map(ns => {
+      const preview = `${ns.prefix}-${ns.year}-${String(ns.next).padStart(ns.pad, "0")}`;
+      return [
+        `<span class="badge gold">${ns.code}</span>`,
+        ns.desc || ns.descr || "—",
+        ns.prefix,
+        ns.year,
+        ns.next,
+        `<code style="color:var(--orange);">${preview}</code>`,
+        `<button class="btn small" data-reset="${ns.code}">Reset</button>
+         <button class="btn small secondary" data-advance="${ns.code}">+ Advance</button>`
+      ];
+    })
+  ]);
+
+  document.querySelectorAll("[data-reset]").forEach(el => {
+    el.onclick = async () => {
+      if (!can("numberseries")) { toast("Permission denied", "err"); return; }
+      const ns = numberSeries.find(n => n.code === el.dataset.reset);
+      if (!confirm(`Reset ${ns.code} to 1? Existing records are not affected.`)) return;
+      try {
+        await api(`/api/number-series/${ns.code}/reset`, { method:"POST" });
+        await refreshNumberSeries();
+        renderNumberSeries();
+        toast(`Series ${ns.code} reset`, "ok");
+      } catch (err) { toast("Failed: " + err.message, "err"); }
+    };
+  });
+  document.querySelectorAll("[data-advance]").forEach(el => {
+    el.onclick = async () => {
+      if (!can("numberseries")) { toast("Permission denied", "err"); return; }
+      try {
+        await api(`/api/number-series/${el.dataset.advance}/advance`, { method:"POST" });
+        await refreshNumberSeries();
+        renderNumberSeries();
+      } catch (err) { toast("Failed: " + err.message, "err"); }
+    };
+  });
+}
+
+/* ============================================================
+   USERS & PERMISSION MATRIX
+   ============================================================ */
+function renderUsers() {
+  $("userActions").hidden = !can("users_manage");
+  $("usrTable").innerHTML = table([
+    ["ID","Name","Role","Email","Status","Actions"],
+    ...users.map(u => [
+      u.id,
+      `<div style="display:flex;align-items:center;gap:8px;">
+        <div style="width:26px;height:26px;border-radius:50%;background:${ROLES[u.role]?.color || '#999'};display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;">${u.init}</div>
+        ${u.name}
+      </div>`,
+      `<span class="badge" style="background:${ROLES[u.role]?.color || '#999'}22;color:${ROLES[u.role]?.color || '#999'}">${u.role}</span>`,
+      u.email || "—",
+      u.active ? `<span class="badge ok">Active</span>` : `<span class="badge bad">Inactive</span>`,
+      can("users_manage") ? `
+        <button class="btn small" data-user-edit="${u.id}" type="button">Edit</button>
+        ${u.active
+          ? `<button class="btn danger small" data-user-deactivate="${u.id}" type="button" ${u.id === currentUserId ? "disabled" : ""}>Deactivate</button>`
+          : `<button class="btn small" data-user-activate="${u.id}" type="button">Reactivate</button>`}
+        ${currentUser().role === "Owner" && u.active
+          ? `<button class="btn secondary small" data-user-password="${u.id}" type="button">Set password</button>`
+          : ""}
+      ` : "—"
+    ])
+  ]);
+  renderRoleKPIs();
+  renderPermissionMatrix();
+}
+
+async function refreshUsers() {
+  users = await api(can("users_manage") ? "/api/users?includeInactive=true" : "/api/users");
+}
+
+async function openUserEditor(user = null) {
+  const dialog = getMasterEditorDialog();
+  dialog.replaceChildren();
+  const title = document.createElement("h2");
+  title.textContent = user ? `Edit User: ${user.name}` : "Add User";
+  title.style.marginTop = "0";
+  dialog.appendChild(title);
+
+  const form = document.createElement("form");
+  form.method = "dialog";
+  form.style.cssText = "display:grid;gap:14px";
+  const addField = (labelText, name, type, value, required = true) => {
+    const label = document.createElement("label");
+    label.textContent = labelText;
+    label.style.cssText = "display:grid;gap:6px;color:#ccc";
+    const input = document.createElement("input");
+    input.type = type;
+    input.name = name;
+    input.value = value || "";
+    input.required = required;
+    input.style.cssText = "padding:9px;border:1px solid #444;border-radius:5px;background:#222;color:#eee";
+    label.appendChild(input);
+    form.appendChild(label);
+    return input;
+  };
+
+  addField("Name", "name", "text", user?.name);
+  addField("Email", "email", "email", user?.email);
+  const roleLabel = document.createElement("label");
+  roleLabel.textContent = "Role";
+  roleLabel.style.cssText = "display:grid;gap:6px;color:#ccc";
+  const roleSelect = document.createElement("select");
+  roleSelect.name = "role";
+  roleSelect.required = true;
+  roleSelect.style.cssText = "padding:9px;border:1px solid #444;border-radius:5px;background:#222;color:#eee";
+  if (!user) {
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Select a role";
+    placeholder.selected = true;
+    placeholder.disabled = true;
+    roleSelect.appendChild(placeholder);
+  }
+  for (const role of Object.keys(ROLES)) {
+    const option = document.createElement("option");
+    option.value = role;
+    option.textContent = role;
+    option.selected = role === user?.role;
+    roleSelect.appendChild(option);
+  }
+  roleLabel.appendChild(roleSelect);
+  form.appendChild(roleLabel);
+  if (!user) {
+    const password = addField("Initial Password (minimum 12 characters)", "password", "password");
+    password.minLength = 12;
+    password.autocomplete = "new-password";
+  }
+
+  const buttons = document.createElement("div");
+  buttons.style.cssText = "display:flex;justify-content:flex-end;gap:8px;margin-top:8px";
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "btn";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", () => dialog.close());
+  const save = document.createElement("button");
+  save.type = "submit";
+  save.className = "btn";
+  save.textContent = user ? "Save Changes" : "Create User";
+  buttons.append(cancel, save);
+  form.appendChild(buttons);
+
+  form.addEventListener("submit", async event => {
+    event.preventDefault();
+    if (!can("users_manage")) {
+      toast("Permission denied", "err");
+      return;
+    }
+    save.disabled = true;
+    try {
+      const payload = Object.fromEntries(new FormData(form));
+      await api(user ? `/api/users/${user.id}` : "/api/users", {
+        method: user ? "PUT" : "POST",
+        body: JSON.stringify(payload)
+      });
+      dialog.close();
+      await refreshUsers();
+      renderUsers();
+      renderUserChip();
+      if (user?.id === currentUserId) applyPermissions();
+      toast(user ? "User updated" : "User created", "ok");
+    } catch (err) {
+      toast("Failed: " + err.message, "err");
+    } finally {
+      save.disabled = false;
+    }
+  });
+  dialog.appendChild(form);
+  dialog.showModal();
+}
+
+$("userAdd").addEventListener("click", () => {
+  if (!can("users_manage")) return toast("Permission denied", "err");
+  openUserEditor().catch(err => toast("Failed to open user editor: " + err.message, "err"));
+});
+
+$("usrTable").addEventListener("click", async event => {
+  const editButton = event.target.closest("[data-user-edit]");
+  const passwordButton = event.target.closest("[data-user-password]");
+  const deactivateButton = event.target.closest("[data-user-deactivate]");
+  const activateButton = event.target.closest("[data-user-activate]");
+  const button = editButton || passwordButton || deactivateButton || activateButton;
+  if (!button) return;
+  if (!can("users_manage")) return toast("Permission denied", "err");
+  const user = users.find(candidate => candidate.id === Number(button.dataset.userEdit ||
+    button.dataset.userPassword || button.dataset.userDeactivate || button.dataset.userActivate));
+  if (!user) return;
+
+  if (editButton) {
+    openUserEditor(user).catch(err => toast("Failed to open user editor: " + err.message, "err"));
+    return;
+  }
+  if (passwordButton) {
+    if (currentUser().role !== "Owner") return toast("Only the Owner can set account passwords", "err");
+    const password = window.prompt(`Set a new password for ${user.name} (minimum 12 characters):`);
+    if (password === null) return;
+    try {
+      await api(`/api/users/${user.id}/password`, {
+        method:"PUT", body:JSON.stringify({ password })
+      });
+      toast(`Password updated for ${user.name}`, "ok");
+    } catch (err) {
+      toast("Failed to update password: " + err.message, "err");
+    }
+    return;
+  }
+
+  const active = Boolean(activateButton);
+  const action = active ? "reactivate" : "deactivate";
+  if (!confirm(`${action[0].toUpperCase() + action.slice(1)} ${user.name}'s account?${active ? "" : " Their active sessions will be signed out."}`)) return;
+  try {
+    await api(active ? `/api/users/${user.id}/status` : `/api/users/${user.id}`, {
+      method: active ? "PUT" : "DELETE",
+      ...(active ? { body:JSON.stringify({ active:true }) } : {})
+    });
+    await refreshUsers();
+    renderUsers();
+    toast(`User ${active ? "reactivated" : "deactivated"}`, "ok");
+  } catch (err) {
+    toast("Failed to update user status: " + err.message, "err");
+  }
+});
+
+function renderRoleKPIs() {
+  const roleCounts = {};
+  users.filter(u => u.active).forEach(u => { roleCounts[u.role] = (roleCounts[u.role] || 0) + 1; });
+  $("roleKpis").innerHTML = Object.entries(ROLES).map(([key, r]) => `
+    <div class="kpi">
+      <div class="label">${key}</div>
+      <div class="value" style="color:${r.color};">${roleCounts[key] || 0}</div>
+      <div class="meta" style="font-size:11px;">${r.desc}</div>
+    </div>
+  `).join("");
+}
+
+function renderPermissionMatrix() {
+  const canEdit = can("users_manage");
+  const roles = Object.keys(ROLES);
+  const html = `
+    <table>
+      <thead>
+        <tr>
+          <th>Permission</th>
+          ${roles.map(r => `<th style="text-align:center;color:${ROLES[r].color};">${r}</th>`).join("")}
+        </tr>
+      </thead>
+      <tbody>
+        ${PERMISSION_KEYS.map(key => `
+          <tr>
+            <td><code>${key}</code></td>
+            ${roles.map(r => `
+              <td style="text-align:center;">
+                <input type="checkbox"
+                  data-role="${r}" data-perm="${key}"
+                  ${rolePermissions[r]?.[key] ? "checked" : ""}
+                  ${canEdit ? "" : "disabled"}>
+              </td>
+            `).join("")}
+          </tr>
+        `).join("")}
+      </tbody>
+    </table>
+  `;
+  $("permMatrix").innerHTML = html;
+
+  if (canEdit) {
+    document.querySelectorAll("#permMatrix input[type=checkbox]").forEach(cb => {
+      cb.onchange = async () => {
+        const role = cb.dataset.role;
+        const perm = cb.dataset.perm;
+        if (role === "Owner" && perm === "users_manage" && !cb.checked) {
+          cb.checked = true;
+          toast("Owner must retain users_manage", "err");
+          return;
+        }
+        try {
+          await api(`/api/permissions/${role}/${perm}`, {
+            method:"PUT",
+            body: JSON.stringify({ granted: cb.checked })
+          });
+          rolePermissions[role][perm] = cb.checked;
+          applyPermissions();
+          toast(`Permission updated: ${role}.${perm} = ${cb.checked}`, "ok");
+        } catch (err) {
+          cb.checked = !cb.checked;
+          toast("Failed: " + err.message, "err");
+        }
+      };
+    });
+  }
+}
+
+/* ============================================================
+   DROPDOWN REFRESH
+   ============================================================ */
+function renderMastersDropdowns() {
+  $("itmCat").innerHTML=""; $("itmBrand").innerHTML=""; $("itmUOM").innerHTML="";
+  $("itmTax").innerHTML=""; $("itmLocation").innerHTML="";
+  renderItems();
+
+  $("uomBase").innerHTML = `<option value="">(Self — base)</option>`;
+  uomMaster.forEach(u => { const o = document.createElement("option"); o.value=u.code; o.textContent=`${u.code} — ${u.name}`; $("uomBase").appendChild(o); });
+
+  $("custTier").innerHTML=""; $("custTerms").innerHTML="";
+  renderCustomers();
+
+  $("supTerms").innerHTML="";
+  paymentTermsMaster.forEach(t => { const o = document.createElement("option"); o.value=t.code; o.textContent=t.name; $("supTerms").appendChild(o); });
+
+  const tierSel = $("posPriceTier");
+  tierSel.innerHTML = `<option value="">(Use customer default)</option>`;
+  priceTierMaster.forEach(t => { const o = document.createElement("option"); o.value=t.code; o.textContent=`${t.code} — ${t.name} (${t.disc}%)`; tierSel.appendChild(o); });
+
+  renderTiers(); renderPaymentTerms();
+}
+
+/* ============================================================
+   BOOT
+   ============================================================ */
+startApp();
+</script>
+</body>
+</html>
