@@ -9,8 +9,10 @@
     "start": "node server.js",
     "desktop": "electron .",
     "dist": "electron-builder",
+    "predist:linux": "node setup-database.js",
     "dist:linux": "electron-builder --linux",
     "dist:mac": "electron-builder --mac",
+    "predist:win": "node setup-database.js",
     "dist:win": "electron-builder --win"
   },
   "keywords": [],

@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog } from "electron";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import dotenv from "dotenv";
@@ -7,12 +7,41 @@ import { getDatabaseConfig } from "../database-config.js";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const userEnvPath = join(app.getPath("userData"), ".env");
-const envPath = existsSync(userEnvPath)
-  ? userEnvPath
-  : app.isPackaged
-    ? join(process.resourcesPath, ".env")
-    : join(projectRoot, ".env");
-dotenv.config({ path: envPath });
+const packagedEnvPath = join(process.resourcesPath, ".env");
+const databaseEnvKeys = new Set([
+  "DATABASE_TARGET",
+  "DATABASE_URL_LOCAL",
+  "DATABASE_URL_AIVEN",
+  "DATABASE_URL",
+  "PGSSLMODE"
+]);
+
+if (app.isPackaged && existsSync(packagedEnvPath)) {
+  const inheritedKeys = new Set(Object.keys(process.env));
+  const packagedValues = dotenv.parse(readFileSync(packagedEnvPath));
+  const userValues = existsSync(userEnvPath)
+    ? dotenv.parse(readFileSync(userEnvPath))
+    : {};
+
+  for (const [key, value] of Object.entries(packagedValues)) {
+    if (!inheritedKeys.has(key)) process.env[key] = value;
+  }
+  for (const [key, value] of Object.entries(userValues)) {
+    if (!databaseEnvKeys.has(key) && !inheritedKeys.has(key)) {
+      process.env[key] = value;
+    }
+  }
+  for (const key of databaseEnvKeys) {
+    if (Object.hasOwn(packagedValues, key)) process.env[key] = packagedValues[key];
+  }
+} else {
+  const envPath = existsSync(userEnvPath)
+    ? userEnvPath
+    : app.isPackaged
+      ? packagedEnvPath
+      : join(projectRoot, ".env");
+  dotenv.config({ path: envPath });
+}
 
 let stopServer;
 let apiServer;

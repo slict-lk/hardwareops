@@ -98,8 +98,9 @@ npm run desktop
 
 The development app reads `.env` from the project root. In a packaged install,
 the build bundles the project-root `.env` and uses it by default. A `.env` in
-the app's user-data directory overrides the bundled configuration. The
-user-data directory is `%APPDATA%/hardwareops` on Windows,
+the app's user-data directory can override non-database settings in the bundled
+configuration; database settings selected when the installer was built take
+precedence. The user-data directory is `%APPDATA%/hardwareops` on Windows,
 `~/Library/Application Support/hardwareops` on macOS, and
 `~/.config/hardwareops` on Linux. The `.env` is included in the installer and
 installed app resources, so anyone who obtains either can extract its database
@@ -113,8 +114,26 @@ npm run dist
 ```
 
 Or select a platform explicitly with `npm run dist:win`, `npm run dist:mac`, or
-`npm run dist:linux`. Builds should be produced on the target platform,
-particularly for macOS signing and packaging.
+`npm run dist:linux`. Before Windows and Linux packaging, the build asks for a
+company name and database target (`local` by default), creates the company
+database, applies `db.sql`, and updates the matching database settings in the
+repository `.env` while preserving its comments and other keys. Company names
+are converted to lowercase database names using letters, numbers, and
+underscores.
+
+For a local target, enter the PostgreSQL superuser password when prompted
+(press Enter to use `postgres`). Windows builds install PostgreSQL 16 with
+winget if `psql` is missing; Linux builds require `psql` to already be on
+`PATH`. The local PostgreSQL service must be startable by the current user.
+For Aiven, configure `DATABASE_URL_AIVEN` with valid credentials in `.env`
+before building; the setup uses the Aiven host and port configured for this
+project.
+
+**Warning:** `db.sql` drops and recreates application tables. If the selected
+company database already exists, setup asks for confirmation before applying
+the schema. Continue only when it is safe to replace those tables. Builds
+should be produced on the target platform, particularly for macOS signing and
+packaging.
 
 ## Project files
 

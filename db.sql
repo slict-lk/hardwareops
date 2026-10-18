@@ -526,45 +526,45 @@ CREATE TRIGGER trg_shrink_incidents_apply
 AFTER INSERT ON shrink_incidents
 FOR EACH ROW EXECUTE FUNCTION trg_shrink_apply();
 
--- ============================================================
--- SEED: POs, GRNs, Invoices, Services, Rentals, Shrink
--- ============================================================
-INSERT INTO purchase_orders (id,supplier_id,order_date,status,expected_date,received_date)
-VALUES
- ('PO-2026-3001',(SELECT id FROM suppliers WHERE name='Ceylon Hardware (Pvt) Ltd'),'2026-10-12','Sent','2026-10-15',NULL),
- ('PO-2026-3002',(SELECT id FROM suppliers WHERE name='Browns Hardware'),'2026-10-10','Received','2026-10-16','2026-10-14');
+-- -- ============================================================
+-- -- SEED: POs, GRNs, Invoices, Services, Rentals, Shrink
+-- -- ============================================================
+-- INSERT INTO purchase_orders (id,supplier_id,order_date,status,expected_date,received_date)
+-- VALUES
+--  ('PO-2026-3001',(SELECT id FROM suppliers WHERE name='Ceylon Hardware (Pvt) Ltd'),'2026-10-12','Sent','2026-10-15',NULL),
+--  ('PO-2026-3002',(SELECT id FROM suppliers WHERE name='Browns Hardware'),'2026-10-10','Received','2026-10-16','2026-10-14');
 
-INSERT INTO po_lines (po_id,sku,qty,cost) VALUES
- ('PO-2026-3001','FST-002',25,620),
- ('PO-2026-3002','LMB-302',40,3200);
+-- INSERT INTO po_lines (po_id,sku,qty,cost) VALUES
+--  ('PO-2026-3001','FST-002',25,620),
+--  ('PO-2026-3002','LMB-302',40,3200);
 
-INSERT INTO grns (id,po_id,supplier_id,date_received,notes,received_by)
-VALUES ('GRN-2026-4001','PO-2026-3002',
- (SELECT id FROM suppliers WHERE name='Browns Hardware'),
- '2026-10-14','All sheets intact',5);
-INSERT INTO grn_lines (grn_id,sku,qty,cost) VALUES
- ('GRN-2026-4001','LMB-302',40,3200);
+-- INSERT INTO grns (id,po_id,supplier_id,date_received,notes,received_by)
+-- VALUES ('GRN-2026-4001','PO-2026-3002',
+--  (SELECT id FROM suppliers WHERE name='Browns Hardware'),
+--  '2026-10-14','All sheets intact',5);
+-- INSERT INTO grn_lines (grn_id,sku,qty,cost) VALUES
+--  ('GRN-2026-4001','LMB-302',40,3200);
 
-INSERT INTO invoices (id,customer_id,invoice_date,due_date,total,status) VALUES
- ('INV-2026-2001',(SELECT id FROM customers WHERE name='Perera Constructions (Pvt) Ltd'),'2026-10-01','2026-10-31',48500,'Paid'),
- ('INV-2026-2002',(SELECT id FROM customers WHERE name='Silva Electricals'),'2026-10-05','2026-11-04',128400,'Unpaid'),
- ('INV-2026-2003',(SELECT id FROM customers WHERE name='Lanka Builders Ltd'),'2026-10-10','2026-12-09',909500,'Unpaid');
+-- INSERT INTO invoices (id,customer_id,invoice_date,due_date,total,status) VALUES
+--  ('INV-2026-2001',(SELECT id FROM customers WHERE name='Perera Constructions (Pvt) Ltd'),'2026-10-01','2026-10-31',48500,'Paid'),
+--  ('INV-2026-2002',(SELECT id FROM customers WHERE name='Silva Electricals'),'2026-10-05','2026-11-04',128400,'Unpaid'),
+--  ('INV-2026-2003',(SELECT id FROM customers WHERE name='Lanka Builders Ltd'),'2026-10-10','2026-12-09',909500,'Unpaid');
 
-INSERT INTO service_tickets (id,service_type,customer_id,date_in,status,price,notes) VALUES
- ('SRV-2026-1001','Key_Cutting',(SELECT id FROM customers WHERE name='Nimal Fernando'),'2026-10-14','Ready',350,'3 copies KW1'),
- ('SRV-2026-1002','Paint_Mix',(SELECT id FROM customers WHERE name='Kamala Jayawardena'),'2026-10-14','In_Progress',3899,'Emulsion cream tint'),
- ('SRV-2026-1003','Pipe_Threading',(SELECT id FROM customers WHERE name='Perera Constructions (Pvt) Ltd'),'2026-10-14','Pending',1200,'3/4in GI pipe'),
- ('SRV-2026-1004','Welding_Work',(SELECT id FROM customers WHERE name='Ranjith Bandara'),'2026-10-13','Ready',2500,'Gate hinge weld');
+-- INSERT INTO service_tickets (id,service_type,customer_id,date_in,status,price,notes) VALUES
+--  ('SRV-2026-1001','Key_Cutting',(SELECT id FROM customers WHERE name='Nimal Fernando'),'2026-10-14','Ready',350,'3 copies KW1'),
+--  ('SRV-2026-1002','Paint_Mix',(SELECT id FROM customers WHERE name='Kamala Jayawardena'),'2026-10-14','In_Progress',3899,'Emulsion cream tint'),
+--  ('SRV-2026-1003','Pipe_Threading',(SELECT id FROM customers WHERE name='Perera Constructions (Pvt) Ltd'),'2026-10-14','Pending',1200,'3/4in GI pipe'),
+--  ('SRV-2026-1004','Welding_Work',(SELECT id FROM customers WHERE name='Ranjith Bandara'),'2026-10-13','Ready',2500,'Gate hinge weld');
 
-INSERT INTO rental_contracts (id,tool_sku,tool_name,customer_id,date_out,date_due,date_returned,rate_per_day) VALUES
- ('RNT-2026-5001','TLS-701','Bosch Impact Drill 13mm',(SELECT id FROM customers WHERE name='Perera Constructions (Pvt) Ltd'),'2026-10-13','2026-10-16',NULL,4500),
- ('RNT-2026-5002','TLS-702','Stanley Measuring Tape 5m',(SELECT id FROM customers WHERE name='Silva Electricals'),'2026-10-10','2026-10-12','2026-10-12',800);
+-- INSERT INTO rental_contracts (id,tool_sku,tool_name,customer_id,date_out,date_due,date_returned,rate_per_day) VALUES
+--  ('RNT-2026-5001','TLS-701','Bosch Impact Drill 13mm',(SELECT id FROM customers WHERE name='Perera Constructions (Pvt) Ltd'),'2026-10-13','2026-10-16',NULL,4500),
+--  ('RNT-2026-5002','TLS-702','Stanley Measuring Tape 5m',(SELECT id FROM customers WHERE name='Silva Electricals'),'2026-10-10','2026-10-12','2026-10-12',800);
 
--- Shrink incidents (apply trigger will deduct inventory)
-INSERT INTO shrink_incidents (id,incident_date,sku,qty,reason,department,value,logged_by) VALUES
- ('SHR-2026-0001','2026-09-20','TLS-701',1,'Theft','Tools',12500,5),
- ('SHR-2026-0002','2026-09-28','ELC-201',1,'Damage','Electrical',7800,5),
- ('SHR-2026-0003','2026-10-05','PLB-101',15,'Miscount','Plumbing',675,5);
+-- -- Shrink incidents (apply trigger will deduct inventory)
+-- INSERT INTO shrink_incidents (id,incident_date,sku,qty,reason,department,value,logged_by) VALUES
+--  ('SHR-2026-0001','2026-09-20','TLS-701',1,'Theft','Tools',12500,5),
+--  ('SHR-2026-0002','2026-09-28','ELC-201',1,'Damage','Electrical',7800,5),
+--  ('SHR-2026-0003','2026-10-05','PLB-101',15,'Miscount','Plumbing',675,5);
 
 COMMIT;
 
