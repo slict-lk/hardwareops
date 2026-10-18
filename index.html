@@ -837,19 +837,32 @@ let sessionToken = sessionStorage.getItem("hardwareopsSession");
 async function api(path, opts = {}) {
   const headers = { "Content-Type": "application/json", ...opts.headers };
   if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
-  const res = await fetch(API + path, {
-    ...opts,
-    headers
-  });
-  if (!res.ok) {
+  const retryLimit = (opts.method || "GET").toUpperCase() === "GET" ? 2 : 0;
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(API + path, {
+      ...opts,
+      headers
+    });
+    if (res.ok) return res.json();
+
     const text = await res.text();
-    let message = text || `HTTP ${res.status}`;
-    try { message = JSON.parse(text).error || message; } catch {}
+    let payload;
+    try { payload = JSON.parse(text); } catch {}
+    const message = payload?.error || text || `HTTP ${res.status}`;
+    if (message === "database_busy" && attempt < retryLimit) {
+      const retryAfter = res.headers.get("Retry-After");
+      const retryAfterSeconds = retryAfter === null ? NaN : Number(retryAfter);
+      const delay = Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0
+        ? Math.min(retryAfterSeconds * 1000, 5000)
+        : 1000;
+      await new Promise(resolve => setTimeout(resolve, delay));
+      continue;
+    }
+
     const error = new Error(message);
     error.status = res.status;
     throw error;
   }
-  return res.json();
 }
 
 function setLoginError(message) {
@@ -1251,8 +1264,8 @@ async function bootstrap() {
     "/api/grns"
   ];
   const data = [];
-  for (let index = 0; index < endpoints.length; index += 10) {
-    data.push(...await Promise.all(endpoints.slice(index, index + 10).map(api)));
+  for (let index = 0; index < endpoints.length; index += 3) {
+    data.push(...await Promise.all(endpoints.slice(index, index + 3).map(api)));
   }
   const [
     permsData, usersData, nsData,
