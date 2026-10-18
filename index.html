@@ -1229,31 +1229,36 @@ document.addEventListener("click", async event => {
    BOOTSTRAP — load everything from API
    ============================================================ */
 async function bootstrap() {
+  const endpoints = [
+    "/api/permissions",
+    "/api/users",
+    "/api/number-series",
+    "/api/uoms",
+    "/api/tax-codes",
+    "/api/categories",
+    "/api/locations",
+    "/api/payment-terms",
+    "/api/price-tiers",
+    "/api/brands",
+    "/api/suppliers",
+    "/api/items",
+    "/api/customers",
+    "/api/services",
+    "/api/rentals",
+    "/api/shrink",
+    "/api/invoices",
+    "/api/purchase-orders",
+    "/api/grns"
+  ];
+  const data = [];
+  for (let index = 0; index < endpoints.length; index += 10) {
+    data.push(...await Promise.all(endpoints.slice(index, index + 10).map(api)));
+  }
   const [
     permsData, usersData, nsData,
     uoms, taxes, cats, locs, terms, tiers, brands, sups,
     items, custs, svcs, rents, shr, invs, pos, grnList
-  ] = await Promise.all([
-    api("/api/permissions"),
-    api("/api/users"),
-    api("/api/number-series"),
-    api("/api/uoms"),
-    api("/api/tax-codes"),
-    api("/api/categories"),
-    api("/api/locations"),
-    api("/api/payment-terms"),
-    api("/api/price-tiers"),
-    api("/api/brands"),
-    api("/api/suppliers"),
-    api("/api/items"),
-    api("/api/customers"),
-    api("/api/services"),
-    api("/api/rentals"),
-    api("/api/shrink"),
-    api("/api/invoices"),
-    api("/api/purchase-orders"),
-    api("/api/grns")
-  ]);
+  ] = data;
 
   rolePermissions     = permsData;
   users               = usersData;
