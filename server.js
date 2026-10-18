@@ -2,7 +2,7 @@
 import express from "express";
 import pg from "pg";
 import cors from "cors";
-import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -15,94 +15,89 @@ const indexFile = fileURLToPath(new URL("./index.html", import.meta.url));
 const poolKey = Symbol.for("hardwareops.postgresPool");
 const authSchemaKey = Symbol.for("hardwareops.authSchemaInitialization");
 const requestContext = new AsyncLocalStorage();
-const loggedPoolErrors = new WeakSet();
 app.use(cors());
 app.use(express.json());
 app.use((req, _res, next) => {
+  const requestId = req.get("x-vercel-id") || req.get("x-request-id") || randomUUID();
+  req.requestId = requestId;
   requestContext.run({
-    endpoint: req.path,
+    endpoint: req.originalUrl.split("?")[0],
     method: req.method,
-    requestId: req.get("x-vercel-id") || req.get("x-request-id") || null
+    requestId
   }, next);
 });
 app.get("/", (_req, res) => res.sendFile(indexFile));
 const scrypt = promisify(scryptCallback);
 
-function logPoolExhaustion(error, req) {
+function logPoolExhaustion(error, req, source = "request") {
   if (error?.code !== "53300") return;
-  if (error && typeof error === "object" && loggedPoolErrors.has(error)) return;
-  if (error && typeof error === "object") loggedPoolErrors.add(error);
   const context = requestContext.getStore();
   const pool = globalThis[poolKey];
   console.error(JSON.stringify({
     event: "postgres_pool_exhaustion",
     code: error.code,
-    endpoint: req?.path || context?.endpoint || "unknown",
+    source,
+    endpoint: req?.originalUrl?.split("?")[0] || context?.endpoint || "unknown",
     method: req?.method || context?.method || "unknown",
-    requestId: req?.get?.("x-vercel-id") || req?.get?.("x-request-id") || context?.requestId || null,
+    requestId: req?.requestId || context?.requestId || null,
     pool: {
-      total: pool?.totalCount ?? 0,
-      idle: pool?.idleCount ?? 0,
-      waiting: pool?.waitingCount ?? 0
+      totalCount: pool?.totalCount ?? 0,
+      idleCount: pool?.idleCount ?? 0,
+      waitingCount: pool?.waitingCount ?? 0
     }
   }));
 }
 
 function getPool() {
   if (!globalThis[poolKey]) {
+    const configuredMax = Number(process.env.PG_POOL_MAX ?? 1);
+    if (!Number.isSafeInteger(configuredMax) || configuredMax < 1) {
+      throw new Error("PG_POOL_MAX must be a positive integer.");
+    }
     const pool = new pg.Pool({
       ...getDatabaseConfig(),
-      max: process.env.VERCEL ? 1 : Number(process.env.PG_POOL_MAX || 10),
-      idleTimeoutMillis: 10000,
+      max: configuredMax,
+      idleTimeoutMillis: 5000,
       connectionTimeoutMillis: 10000,
       allowExitOnIdle: true
     });
-    pool.on("error", error => logPoolExhaustion(error));
+    pool.on("error", error => logPoolExhaustion(error, undefined, "pool"));
     globalThis[poolKey] = pool;
   }
   return globalThis[poolKey];
 }
 
 const q = async (text, params) => {
-  try {
-    return await getPool().query(text, params);
-  } catch (error) {
-    logPoolExhaustion(error);
-    throw error;
-  }
+  return getPool().query(text, params);
 };
 
 async function connectDb() {
-  try {
-    return await getPool().connect();
-  } catch (error) {
-    logPoolExhaustion(error);
-    throw error;
-  }
+  return getPool().connect();
 }
 
 function ensureAuthSchema() {
-  if (!globalThis[authSchemaKey]) {
-    globalThis[authSchemaKey] = initializeAuthSchema().catch(error => {
-      delete globalThis[authSchemaKey];
-      throw error;
-    });
-  }
-  return globalThis[authSchemaKey];
+  return initializeAuthSchema();
+}
+
+function handleDatabaseBusy(error, req, res, source) {
+  if (error?.code !== "53300") return false;
+  logPoolExhaustion(error, req, source);
+  res.set("Retry-After", "2").status(503).json({ error: "database_busy" });
+  return true;
 }
 
 app.use("/api", (req, res, next) => {
   ensureAuthSchema().then(() => next()).catch(error => {
-    logPoolExhaustion(error, req);
+    if (handleDatabaseBusy(error, req, res, "initializeAuthSchema")) return;
     console.error("Failed to initialize HardwareOps API:", error);
     res.status(500).json({ error: "The API could not connect to its database." });
   });
 });
 
 /* ---------- helpers ---------- */
-const wrap = fn => (req, res) =>
+const wrap = (fn, source = "request") => (req, res) =>
   fn(req, res).catch(err => {
-    logPoolExhaustion(err, req);
+    if (handleDatabaseBusy(err, req, res, source)) return;
     console.error(err);
     res.status(500).json({ error: err.message });
   });
@@ -144,7 +139,7 @@ async function requireAuth(req, res, next) {
     req.user = rows[0];
     next();
   } catch (err) {
-    logPoolExhaustion(err, req);
+    if (handleDatabaseBusy(err, req, res, "requireAuth")) return;
     console.error("Authentication lookup failed:", err);
     res.status(500).json({ error: "Authentication service unavailable" });
   }
@@ -170,7 +165,7 @@ app.post("/api/login", wrap(async (req, res) => {
     VALUES ($1, $2, NOW() + INTERVAL '12 hours')`,
   [hashSessionToken(token), rows[0].id]);
   res.json({ token });
-}));
+}, "login"));
 
 app.post("/api/logout", wrap(async (req, res) => {
   const token = bearerToken(req);
@@ -189,6 +184,7 @@ async function requireMasterEdit(req, res, next) {
     if (!rows[0]?.granted) return res.status(403).json({ error: "Master data editing is not permitted for this role." });
     next();
   } catch (err) {
+    if (handleDatabaseBusy(err, req, res, "requireMasterEdit")) return;
     console.error("Master edit permission lookup failed:", err);
     res.status(500).json({ error: "Unable to verify master data permissions." });
   }
@@ -203,6 +199,7 @@ async function requireUserManage(req, res, next) {
     if (!rows[0]?.granted) return res.status(403).json({ error: "User management is not permitted for this role." });
     next();
   } catch (err) {
+    if (handleDatabaseBusy(err, req, res, "requireUserManage")) return;
     console.error("User management permission lookup failed:", err);
     res.status(500).json({ error: "Unable to verify user management permissions." });
   }
@@ -596,6 +593,7 @@ function masterMutation(fn) {
     try {
       await fn(req, res);
     } catch (err) {
+      if (handleDatabaseBusy(err, req, res, "request")) return;
       logPoolExhaustion(err, req);
       console.error(err);
       if (err.code === "23503") {
@@ -937,27 +935,32 @@ app.post("/api/shrink", wrap(async (req,res)=>{
   res.json({ id: next_number });
 }));
 
-export async function initializeAuthSchema() {
-  await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT`);
-  await q(`
-    CREATE TABLE IF NOT EXISTS auth_sessions (
-      token_hash TEXT PRIMARY KEY,
-      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      expires_at TIMESTAMPTZ NOT NULL
-    )`);
-  await q(`DELETE FROM auth_sessions WHERE expires_at <= NOW()`);
+export function initializeAuthSchema() {
+  if (!globalThis[authSchemaKey]) {
+    globalThis[authSchemaKey] = (async () => {
+      await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT`);
+      await q(`
+        CREATE TABLE IF NOT EXISTS auth_sessions (
+          token_hash TEXT PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          expires_at TIMESTAMPTZ NOT NULL
+        )`);
+      await q(`DELETE FROM auth_sessions WHERE expires_at <= NOW()`);
 
-  if (process.env.AUTH_BOOTSTRAP_PASSWORD) {
-    if (process.env.AUTH_BOOTSTRAP_PASSWORD.length < 12) {
-      throw new Error("AUTH_BOOTSTRAP_PASSWORD must be at least 12 characters");
-    }
-    const email = (process.env.AUTH_BOOTSTRAP_EMAIL || "rick@store.lk").trim().toLowerCase();
-    const { rowCount } = await q(`
-      UPDATE users SET password_hash = $1
-      WHERE lower(email) = $2 AND role_key = 'Owner' AND password_hash IS NULL AND active`,
-    [await hashPassword(process.env.AUTH_BOOTSTRAP_PASSWORD), email]);
-    if (rowCount) console.log(`Initial Owner password configured for ${email}`);
+      if (process.env.AUTH_BOOTSTRAP_PASSWORD) {
+        if (process.env.AUTH_BOOTSTRAP_PASSWORD.length < 12) {
+          throw new Error("AUTH_BOOTSTRAP_PASSWORD must be at least 12 characters");
+        }
+        const email = (process.env.AUTH_BOOTSTRAP_EMAIL || "rick@store.lk").trim().toLowerCase();
+        const { rowCount } = await q(`
+          UPDATE users SET password_hash = $1
+          WHERE lower(email) = $2 AND role_key = 'Owner' AND password_hash IS NULL AND active`,
+        [await hashPassword(process.env.AUTH_BOOTSTRAP_PASSWORD), email]);
+        if (rowCount) console.log(`Initial Owner password configured for ${email}`);
+      }
+    })();
   }
+  return globalThis[authSchemaKey];
 }
 
 let httpServer;

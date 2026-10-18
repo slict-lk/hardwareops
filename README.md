@@ -99,12 +99,44 @@ The project can be deployed to Vercel as an Express serverless app with a web fr
 
    If you use a local PostgreSQL instance or a different provider, also set `DATABASE_TARGET` and the matching `DATABASE_URL_LOCAL` / `DATABASE_URL_AIVEN` variables as needed.
 
-   Use the provider's pooled PostgreSQL connection URL for `DATABASE_URL` (for example, its PgBouncer transaction pooler, Neon pooled URL, or Supabase pooler). A small per-function pool cannot cap the total connections across independently scaled Vercel instances; a provider-side pooler is recommended for production.
+   `PG_POOL_MAX` defaults to `1` per warm function instance. Keep `PG_POOL_MAX` multiplied by the maximum number of concurrently active Vercel instances safely below the database connection limit. The Vercel function configuration in `vercel.json` sets `maxConcurrency` to `20`; confirm that this setting is applied to the deployed function and monitor database connections.
 
-   The API uses one `pg.Pool` per warm function instance, caps each Vercel instance at one connection, and retires idle connections after 10 seconds. PgBouncer transaction pooling does not support relying on connection-level session state; keep transactions explicit and avoid session-level settings, temporary tables, and named prepared statements.
+   The API reuses one `pg.Pool` per warm function instance, caps it at `PG_POOL_MAX`, and retires idle connections after 5 seconds. Authentication schema setup is cached once per warm instance. For Aiven Hobbyist, use `PG_POOL_MAX=1`: there is no PgBouncer pooler, and the PostgreSQL limit is 25 total connections.
 
 3. No custom build command is required. The Express app serves `index.html` at `/` and handles `/api/*` requests. Do not set `PORT`; Vercel assigns function ports automatically.
 4. Once the project is deployed, open the site and sign in with the configured Owner account.
+
+## Aiven Hobbyist deployment
+
+Aiven Hobbyist supports at most 25 PostgreSQL connections and does not include
+PgBouncer. Set `PG_POOL_MAX=1` in the Vercel production environment and retain
+`maxConcurrency=20` in `vercel.json`. Budget connections as
+`20 function connections + 1 superuser reserve + 4 admin/migration headroom = 25`;
+do not increase either value without recalculating the full connection budget.
+The pool limit is per warm Vercel instance, so inspect production usage after
+deployments and during bursts rather than assuming a provider-side pooler will
+absorb extra connections.
+
+Check the current user's connection count in the Aiven SQL console or with
+`psql`:
+
+```sql
+SELECT count(*) FROM pg_stat_activity WHERE usename = current_user;
+```
+
+The total should stay at or below 25, and idle connections attributable to the
+application should remain bounded by `PG_POOL_MAX` per warm Vercel instance.
+If production concurrency grows beyond this budget, upgrade to Aiven Startup
+and use its PgBouncer connection pooling rather than raising PostgreSQL's
+connection limit on Hobbyist.
+
+To generate a local authenticated burst against a running API, configure
+`LOAD_TEST_BASE_URL`, `AUTH_BOOTSTRAP_EMAIL`, and `AUTH_BOOTSTRAP_PASSWORD`,
+then run `npm run load-test`. The harness sends 56 concurrent requests across
+`/api/me`, `/api/login`, `/api/tax-codes`, `/api/invoices`, `/api/items`,
+`/api/users`, `/api/suppliers`, `/api/grns`, and `/api/services`. It accepts
+successful responses or the documented 503 `database_busy` response with
+`Retry-After`, and fails on other errors.
 
 ## Desktop app
 
