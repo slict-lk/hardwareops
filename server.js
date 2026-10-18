@@ -4,6 +4,7 @@ import pg from "pg";
 import cors from "cors";
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import "dotenv/config";
@@ -11,38 +12,88 @@ import { getDatabaseConfig } from "./database-config.js";
 
 const app = express();
 const indexFile = fileURLToPath(new URL("./index.html", import.meta.url));
+const poolKey = Symbol.for("hardwareops.postgresPool");
+const authSchemaKey = Symbol.for("hardwareops.authSchemaInitialization");
+const requestContext = new AsyncLocalStorage();
+const loggedPoolErrors = new WeakSet();
 app.use(cors());
 app.use(express.json());
+app.use((req, _res, next) => {
+  requestContext.run({
+    endpoint: req.path,
+    method: req.method,
+    requestId: req.get("x-vercel-id") || req.get("x-request-id") || null
+  }, next);
+});
 app.get("/", (_req, res) => res.sendFile(indexFile));
 const scrypt = promisify(scryptCallback);
 
-let pool;
-let authSchemaInitialization;
+function logPoolExhaustion(error, req) {
+  if (error?.code !== "53300") return;
+  if (error && typeof error === "object" && loggedPoolErrors.has(error)) return;
+  if (error && typeof error === "object") loggedPoolErrors.add(error);
+  const context = requestContext.getStore();
+  const pool = globalThis[poolKey];
+  console.error(JSON.stringify({
+    event: "postgres_pool_exhaustion",
+    code: error.code,
+    endpoint: req?.path || context?.endpoint || "unknown",
+    method: req?.method || context?.method || "unknown",
+    requestId: req?.get?.("x-vercel-id") || req?.get?.("x-request-id") || context?.requestId || null,
+    pool: {
+      total: pool?.totalCount ?? 0,
+      idle: pool?.idleCount ?? 0,
+      waiting: pool?.waitingCount ?? 0
+    }
+  }));
+}
 
 function getPool() {
-  if (!pool) {
-    pool = new pg.Pool({
+  if (!globalThis[poolKey]) {
+    const pool = new pg.Pool({
       ...getDatabaseConfig(),
-      max: Number(process.env.PG_POOL_MAX || 10),
-      idleTimeoutMillis: Number(process.env.PG_IDLE_TIMEOUT_MS || 30000),
-      connectionTimeoutMillis: Number(process.env.PG_CONN_TIMEOUT_MS || 10000)
+      max: process.env.VERCEL ? 1 : Number(process.env.PG_POOL_MAX || 10),
+      idleTimeoutMillis: 10000,
+      connectionTimeoutMillis: 10000,
+      allowExitOnIdle: true
     });
+    pool.on("error", error => logPoolExhaustion(error));
+    globalThis[poolKey] = pool;
   }
-  return pool;
+  return globalThis[poolKey];
 }
 
-const q = (text, params) => getPool().query(text, params);
+const q = async (text, params) => {
+  try {
+    return await getPool().query(text, params);
+  } catch (error) {
+    logPoolExhaustion(error);
+    throw error;
+  }
+};
+
+async function connectDb() {
+  try {
+    return await getPool().connect();
+  } catch (error) {
+    logPoolExhaustion(error);
+    throw error;
+  }
+}
 
 function ensureAuthSchema() {
-  authSchemaInitialization ??= initializeAuthSchema().catch(error => {
-    authSchemaInitialization = undefined;
-    throw error;
-  });
-  return authSchemaInitialization;
+  if (!globalThis[authSchemaKey]) {
+    globalThis[authSchemaKey] = initializeAuthSchema().catch(error => {
+      delete globalThis[authSchemaKey];
+      throw error;
+    });
+  }
+  return globalThis[authSchemaKey];
 }
 
-app.use("/api", (_req, res, next) => {
+app.use("/api", (req, res, next) => {
   ensureAuthSchema().then(() => next()).catch(error => {
+    logPoolExhaustion(error, req);
     console.error("Failed to initialize HardwareOps API:", error);
     res.status(500).json({ error: "The API could not connect to its database." });
   });
@@ -51,6 +102,7 @@ app.use("/api", (_req, res, next) => {
 /* ---------- helpers ---------- */
 const wrap = fn => (req, res) =>
   fn(req, res).catch(err => {
+    logPoolExhaustion(err, req);
     console.error(err);
     res.status(500).json({ error: err.message });
   });
@@ -92,6 +144,7 @@ async function requireAuth(req, res, next) {
     req.user = rows[0];
     next();
   } catch (err) {
+    logPoolExhaustion(err, req);
     console.error("Authentication lookup failed:", err);
     res.status(500).json({ error: "Authentication service unavailable" });
   }
@@ -218,7 +271,7 @@ app.put("/api/users/:id", requireUserManage, wrap(async (req, res) => {
     return res.status(400).json({ error: "Enter a valid email address." });
   }
   const init = name.split(/\s+/).filter(Boolean).slice(0, 2).map(part => part[0].toUpperCase()).join("");
-  const client = await pool.connect();
+  const client = await connectDb();
   try {
     await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock($1)", [7319421]);
@@ -257,7 +310,7 @@ app.put("/api/users/:id", requireUserManage, wrap(async (req, res) => {
 }));
 
 async function setUserActive(userId, active) {
-  const client = await pool.connect();
+  const client = await connectDb();
   try {
     await client.query("BEGIN");
     await client.query("SELECT pg_advisory_xact_lock($1)", [7319421]);
@@ -543,6 +596,7 @@ function masterMutation(fn) {
     try {
       await fn(req, res);
     } catch (err) {
+      logPoolExhaustion(err, req);
       console.error(err);
       if (err.code === "23503") {
         return res.status(409).json({ error: "This record is still in use and cannot be deleted or changed." });
@@ -936,8 +990,10 @@ export function stopServer() {
         });
         httpServer = undefined;
       }
+      const pool = globalThis[poolKey];
       if (pool) {
         await pool.end();
+        delete globalThis[poolKey];
       }
     })();
   }

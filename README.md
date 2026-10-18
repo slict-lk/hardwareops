@@ -99,6 +99,10 @@ The project can be deployed to Vercel as an Express serverless app with a web fr
 
    If you use a local PostgreSQL instance or a different provider, also set `DATABASE_TARGET` and the matching `DATABASE_URL_LOCAL` / `DATABASE_URL_AIVEN` variables as needed.
 
+   Use the provider's pooled PostgreSQL connection URL for `DATABASE_URL` (for example, its PgBouncer transaction pooler, Neon pooled URL, or Supabase pooler). A small per-function pool cannot cap the total connections across independently scaled Vercel instances; a provider-side pooler is recommended for production.
+
+   The API uses one `pg.Pool` per warm function instance, caps each Vercel instance at one connection, and retires idle connections after 10 seconds. PgBouncer transaction pooling does not support relying on connection-level session state; keep transactions explicit and avoid session-level settings, temporary tables, and named prepared statements.
+
 3. No custom build command is required. The Express app serves `index.html` at `/` and handles `/api/*` requests. Do not set `PORT`; Vercel assigns function ports automatically.
 4. Once the project is deployed, open the site and sign in with the configured Owner account.
 
