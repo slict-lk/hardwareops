@@ -99,7 +99,9 @@ The project can be deployed to Vercel as an Express serverless app with a web fr
 
    If you use a local PostgreSQL instance or a different provider, also set `DATABASE_TARGET` and the matching `DATABASE_URL_LOCAL` / `DATABASE_URL_AIVEN` variables as needed.
 
-   `PG_POOL_MAX` defaults to `1` per warm function instance. Keep `PG_POOL_MAX` multiplied by the maximum number of concurrently active Vercel instances safely below the database connection limit. The Vercel function configuration in `vercel.json` sets `maxConcurrency` to `20`; confirm that this setting is applied to the deployed function and monitor database connections.
+   On Vercel Hobby, `maxConcurrency` is a beta feature with different pricing. Opt in by setting `VERCEL_BETA_MAX_CONCURRENCY=1` in the Vercel project environment variables, then redeploy. The function configuration in `vercel.json` sets `maxConcurrency` to `20`; do not rely on this limit until the opt-in is set and the redeployment has completed. Review Vercel's applicable pricing before opting in.
+
+   `PG_POOL_MAX` defaults to `1` per warm function instance. Keep `PG_POOL_MAX` multiplied by the maximum number of concurrently active Vercel instances safely below the database connection limit, and monitor actual database connections.
 
    The API reuses one `pg.Pool` per warm function instance, caps it at `PG_POOL_MAX`, and retires idle connections after 5 seconds. Authentication schema setup is cached once per warm instance. For Aiven Hobbyist, use `PG_POOL_MAX=1`: there is no PgBouncer pooler, and the PostgreSQL limit is 25 total connections.
 
@@ -110,7 +112,10 @@ The project can be deployed to Vercel as an Express serverless app with a web fr
 
 Aiven Hobbyist supports at most 25 PostgreSQL connections and does not include
 PgBouncer. Set `PG_POOL_MAX=1` in the Vercel production environment and retain
-`maxConcurrency=20` in `vercel.json`. Budget connections as
+`maxConcurrency=20` in `vercel.json`. On Vercel Hobby, also set
+`VERCEL_BETA_MAX_CONCURRENCY=1` in the project environment and redeploy to opt
+in to the beta `maxConcurrency` setting; it has different pricing, so review
+the applicable Vercel pricing before enabling it. Budget connections as
 `20 function connections + 1 superuser reserve + 4 admin/migration headroom = 25`;
 do not increase either value without recalculating the full connection budget.
 The pool limit is per warm Vercel instance, so inspect production usage after
