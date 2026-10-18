@@ -4,17 +4,20 @@ import pg from "pg";
 import cors from "cors";
 import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import "dotenv/config";
 import { getDatabaseConfig } from "./database-config.js";
 
 const app = express();
+const indexFile = fileURLToPath(new URL("./index.html", import.meta.url));
 app.use(cors());
 app.use(express.json());
+app.get("/", (_req, res) => res.sendFile(indexFile));
 const scrypt = promisify(scryptCallback);
 
 let pool;
+let authSchemaInitialization;
 
 function getPool() {
   if (!pool) {
@@ -29,6 +32,21 @@ function getPool() {
 }
 
 const q = (text, params) => getPool().query(text, params);
+
+function ensureAuthSchema() {
+  authSchemaInitialization ??= initializeAuthSchema().catch(error => {
+    authSchemaInitialization = undefined;
+    throw error;
+  });
+  return authSchemaInitialization;
+}
+
+app.use("/api", (_req, res, next) => {
+  ensureAuthSchema().then(() => next()).catch(error => {
+    console.error("Failed to initialize HardwareOps API:", error);
+    res.status(500).json({ error: "The API could not connect to its database." });
+  });
+});
 
 /* ---------- helpers ---------- */
 const wrap = fn => (req, res) =>
@@ -892,7 +910,7 @@ let httpServer;
 let stopPromise;
 
 export async function startServer(port = process.env.PORT || 4000, host) {
-  await initializeAuthSchema();
+  await ensureAuthSchema();
   await new Promise((resolveListen, rejectListen) => {
     const onError = error => {
       httpServer = undefined;
@@ -927,6 +945,7 @@ export function stopServer() {
 }
 
 export { app };
+export default app;
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   startServer().catch(err => {
