@@ -14,14 +14,21 @@ app.use(cors());
 app.use(express.json());
 const scrypt = promisify(scryptCallback);
 
-const pool = new pg.Pool({
-  ...getDatabaseConfig(),
-  max: Number(process.env.PG_POOL_MAX || 10),
-  idleTimeoutMillis: Number(process.env.PG_IDLE_TIMEOUT_MS || 30000),
-  connectionTimeoutMillis: Number(process.env.PG_CONN_TIMEOUT_MS || 10000)
-});
+let pool;
 
-const q = (text, params) => pool.query(text, params);
+function getPool() {
+  if (!pool) {
+    pool = new pg.Pool({
+      ...getDatabaseConfig(),
+      max: Number(process.env.PG_POOL_MAX || 10),
+      idleTimeoutMillis: Number(process.env.PG_IDLE_TIMEOUT_MS || 30000),
+      connectionTimeoutMillis: Number(process.env.PG_CONN_TIMEOUT_MS || 10000)
+    });
+  }
+  return pool;
+}
+
+const q = (text, params) => getPool().query(text, params);
 
 /* ---------- helpers ---------- */
 const wrap = fn => (req, res) =>
@@ -858,7 +865,7 @@ app.post("/api/shrink", wrap(async (req,res)=>{
   res.json({ id: next_number });
 }));
 
-async function initializeAuthSchema() {
+export async function initializeAuthSchema() {
   await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT`);
   await q(`
     CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -911,11 +918,15 @@ export function stopServer() {
         });
         httpServer = undefined;
       }
-      await pool.end();
+      if (pool) {
+        await pool.end();
+      }
     })();
   }
   return stopPromise;
 }
+
+export { app };
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   startServer().catch(err => {

@@ -83,6 +83,25 @@ analytics workflows with role-based access.
    passwords for other accounts in **Masters → Users**. Passwords must contain
    at least 12 characters.
 
+## Vercel deployment
+
+The project can be deployed to Vercel as a static frontend with a serverless API.
+
+1. Import the repository into Vercel and keep the default framework settings since the app is served as a static site with a Node.js serverless function.
+2. Set the production environment variables in the Vercel project settings:
+
+   ```dotenv
+   DATABASE_URL=postgresql://user:password@host:5432/hardwareops
+   PGSSLMODE=require
+   AUTH_BOOTSTRAP_EMAIL=rick@store.lk
+   AUTH_BOOTSTRAP_PASSWORD=replace-with-a-unique-password-of-at-least-12-characters
+   ```
+
+   If you use a local PostgreSQL instance or a different provider, also set `DATABASE_TARGET` and the matching `DATABASE_URL_LOCAL` / `DATABASE_URL_AIVEN` variables as needed.
+
+3. No custom build command is required; Vercel serves `index.html` from the repository root and routes `/api/*` requests to the serverless function in `api/[...path].js`. Do not set `PORT`; Vercel assigns function ports automatically.
+4. Once the project is deployed, open the site and sign in with the configured Owner account.
+
 ## Desktop app
 
 The desktop app starts the local API on an available loopback port and opens the

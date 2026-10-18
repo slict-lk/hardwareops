@@ -831,7 +831,7 @@ const $ = id => document.getElementById(id);
 /* ============================================================
    API CLIENT
    ============================================================ */
-const API = window.HARDWAREOPS_API || "http://localhost:4000";
+const API = window.HARDWAREOPS_API || (window.location.hostname === "localhost" ? "http://localhost:4000" : window.location.origin);
 let sessionToken = sessionStorage.getItem("hardwareopsSession");
 
 async function api(path, opts = {}) {
