@@ -1289,12 +1289,17 @@ async function bootstrap() {
 }
 
 async function startApp() {
+  const startingToken = sessionToken;
+  if (!startingToken) return;
+
   try {
     authenticatedUser = await api("/api/me");
+    if (sessionToken !== startingToken) return;
     $("loginScreen").hidden = true;
     $("appShell").hidden = false;
     await bootstrap();
   } catch (err) {
+    if (sessionToken !== startingToken) return;
     $("appShell").hidden = true;
     $("loginScreen").hidden = false;
     if (err.status === 401) {
@@ -2784,7 +2789,7 @@ function renderMastersDropdowns() {
 /* ============================================================
    BOOT
    ============================================================ */
-startApp();
+if (sessionToken) startApp();
 </script>
 </body>
 </html>
