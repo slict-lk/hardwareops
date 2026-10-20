@@ -5,6 +5,15 @@
 
 BEGIN;
 
+DROP TABLE IF EXISTS bank_reconciliations CASCADE;
+DROP TABLE IF EXISTS period_locks CASCADE;
+DROP TABLE IF EXISTS budgets CASCADE;
+DROP TABLE IF EXISTS fixed_assets CASCADE;
+DROP TABLE IF EXISTS expenses CASCADE;
+DROP TABLE IF EXISTS expense_categories CASCADE;
+DROP TABLE IF EXISTS journal_lines CASCADE;
+DROP TABLE IF EXISTS journal_entries CASCADE;
+DROP TABLE IF EXISTS chart_of_accounts CASCADE;
 DROP TABLE IF EXISTS shrink_incidents CASCADE;
 DROP TABLE IF EXISTS rental_contracts CASCADE;
 DROP TABLE IF EXISTS service_tickets CASCADE;
@@ -62,22 +71,27 @@ INSERT INTO role_permissions (role_key, perm_key, granted) VALUES
  ('Owner','grn',TRUE),('Owner','services',TRUE),('Owner','rentals',TRUE),('Owner','b2b',TRUE),
  ('Owner','shrink',TRUE),('Owner','gmroi',TRUE),('Owner','analytics',TRUE),('Owner','masters',TRUE),
  ('Owner','masters_edit',TRUE),('Owner','numberseries',TRUE),('Owner','users_manage',TRUE),
+ ('Owner','finance',TRUE),('Owner','finance_edit',TRUE),
  ('Manager','dashboard',TRUE),('Manager','pos',TRUE),('Manager','inventory',TRUE),('Manager','po',TRUE),
  ('Manager','grn',TRUE),('Manager','services',TRUE),('Manager','rentals',TRUE),('Manager','b2b',TRUE),
  ('Manager','shrink',TRUE),('Manager','gmroi',TRUE),('Manager','analytics',TRUE),('Manager','masters',TRUE),
  ('Manager','masters_edit',TRUE),('Manager','numberseries',TRUE),('Manager','users_manage',FALSE),
+ ('Manager','finance',TRUE),('Manager','finance_edit',TRUE),
  ('Cashier','dashboard',FALSE),('Cashier','pos',TRUE),('Cashier','inventory',FALSE),('Cashier','po',FALSE),
  ('Cashier','grn',FALSE),('Cashier','services',TRUE),('Cashier','rentals',TRUE),('Cashier','b2b',FALSE),
  ('Cashier','shrink',FALSE),('Cashier','gmroi',FALSE),('Cashier','analytics',FALSE),('Cashier','masters',FALSE),
  ('Cashier','masters_edit',FALSE),('Cashier','numberseries',FALSE),('Cashier','users_manage',FALSE),
+ ('Cashier','finance',FALSE),('Cashier','finance_edit',FALSE),
  ('Storekeeper','dashboard',TRUE),('Storekeeper','pos',FALSE),('Storekeeper','inventory',TRUE),('Storekeeper','po',TRUE),
  ('Storekeeper','grn',TRUE),('Storekeeper','services',FALSE),('Storekeeper','rentals',TRUE),('Storekeeper','b2b',FALSE),
  ('Storekeeper','shrink',TRUE),('Storekeeper','gmroi',FALSE),('Storekeeper','analytics',FALSE),('Storekeeper','masters',TRUE),
  ('Storekeeper','masters_edit',TRUE),('Storekeeper','numberseries',FALSE),('Storekeeper','users_manage',FALSE),
+ ('Storekeeper','finance',FALSE),('Storekeeper','finance_edit',FALSE),
  ('Accountant','dashboard',TRUE),('Accountant','pos',FALSE),('Accountant','inventory',FALSE),('Accountant','po',FALSE),
  ('Accountant','grn',FALSE),('Accountant','services',FALSE),('Accountant','rentals',FALSE),('Accountant','b2b',TRUE),
  ('Accountant','shrink',FALSE),('Accountant','gmroi',TRUE),('Accountant','analytics',TRUE),('Accountant','masters',FALSE),
- ('Accountant','masters_edit',FALSE),('Accountant','numberseries',TRUE),('Accountant','users_manage',FALSE);
+ ('Accountant','masters_edit',FALSE),('Accountant','numberseries',TRUE),('Accountant','users_manage',FALSE),
+ ('Accountant','finance',TRUE),('Accountant','finance_edit',TRUE);
 
 -- ============================================================
 -- USERS
@@ -127,7 +141,9 @@ INSERT INTO number_series VALUES
  ('SRV','SRV','2026',1005,4,'Service Ticket'),
  ('RNT','RNT','2026',5003,4,'Rental Contract'),
  ('SHR','SHR','2026',4,4,'Shrink Incident'),
- ('QUO','QUO','2026',1,4,'Quotation');
+ ('QUO','QUO','2026',1,4,'Quotation'),
+ ('JE','JE','2026',1001,5,'Journal Entry'),
+ ('EXP','EXP','2026',2001,5,'Expense Voucher');
 
 -- Atomic next-number generator
 CREATE OR REPLACE FUNCTION fn_next_number(p_code TEXT)
@@ -314,34 +330,34 @@ CREATE TABLE inventory (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-INSERT INTO items (sku,name,category_code,brand_code,uom_code,tax_code,cost,price,reorder_point,supplier_id,location_code,last_sold)
-SELECT v.sku, v.name, v.cat, v.brand, v.uom, v.tax, v.cost, v.price, v.reorder, s.id, v.loc, v.last_sold::DATE
-FROM (VALUES
- ('FST-001','1/4in Hex Bolt Zinc (Box)','HWD','GEN','BOX','VAT18',850,1490,10,'Ceylon Hardware (Pvt) Ltd','SHOP','2026-10-01'),
- ('FST-002','3/8in Hex Nut (Box)','HWD','GEN','BOX','VAT18',620,1190,10,'Ceylon Hardware (Pvt) Ltd','SHOP','2026-09-12'),
- ('PLB-101','1/2in PVC Elbow','PLB','GEN','EA','VAT18',45,129,50,'Lanka Pipes & Fittings','SHOP','2026-10-10'),
- ('PLB-102','PVC Cement 500ml','PLB','GEN','EA','VAT18',410,899,15,'Lanka Pipes & Fittings','SHOP','2026-10-08'),
- ('ELC-201','2.5mm² Copper Wire (100m)','ELC','GEN','BDL','VAT18',7800,11990,8,'Hayleys Industrial','BACK','2026-09-20'),
- ('ELC-202','13A Twin Socket (UK)','ELC','GEN','EA','VAT18',110,279,40,'Hayleys Industrial','SHOP','2026-10-12'),
- ('LMB-301','2x4x8 C24 Timber','LMB','GEN','EA','VAT18',420,749,100,'Browns Hardware','YARD','2026-10-14'),
- ('LMB-302','3/4in Plywood 4x8','LMB','GEN','SHT','VAT18',3200,5299,20,'Browns Hardware','YARD','2026-09-28'),
- ('PNT-401','Asian Paints White Emulsion 4L','PNT','APAINTS','L','VAT18',1450,3299,20,'Asian Paints Lanka','SHOP','2026-10-09'),
- ('PNT-402','Asian Paints Base Tint 4L','PNT','APAINTS','L','VAT18',1800,3899,30,'Asian Paints Lanka','SHOP','2026-10-11'),
- ('CEM-501','Tokyo Super Cement 50kg','CEM','TOKYO','BAG','VAT18',2350,2650,80,'Tokyo Cement Distributors','YARD','2026-10-14'),
- ('CEM-502','Sanstha Cement 50kg','CEM','TOKYO','BAG','VAT18',2200,2500,40,'Tokyo Cement Distributors','YARD','2026-10-13'),
- ('STL-601','12mm Tor Steel Bar (6m)','STL','CEYSTEEL','EA','VAT18',1450,1790,150,'Ceylon Steel Corp','YARD','2026-10-12'),
- ('STL-602','Binding Wire 1kg','STL','CEYSTEEL','KG','VAT18',620,950,40,'Ceylon Steel Corp','YARD','2026-10-14'),
- ('TLS-701','Bosch Impact Drill 13mm','TLS','BOSCH','EA','VAT18',12500,18900,5,'Hayleys Industrial','BACK','2026-10-13'),
- ('TLS-702','Stanley Measuring Tape 5m','TLS','STANLEY','EA','VAT18',620,1290,40,'Sathosa Hardware','SHOP','2026-10-14'),
- ('HRD-801','#8 x 1in Wood Screw (Box)','HWD','GEN','BOX','VAT18',480,899,20,'Ceylon Hardware (Pvt) Ltd','SHOP','2026-09-18')
-) AS v(sku,name,cat,brand,uom,tax,cost,price,reorder,supname,loc,last_sold)
-JOIN suppliers s ON s.name = v.supname;
+-- INSERT INTO items (sku,name,category_code,brand_code,uom_code,tax_code,cost,price,reorder_point,supplier_id,location_code,last_sold)
+-- SELECT v.sku, v.name, v.cat, v.brand, v.uom, v.tax, v.cost, v.price, v.reorder, s.id, v.loc, v.last_sold::DATE
+-- FROM (VALUES
+--  ('FST-001','1/4in Hex Bolt Zinc (Box)','HWD','GEN','BOX','VAT18',850,1490,10,'Ceylon Hardware (Pvt) Ltd','SHOP','2026-10-01'),
+--  ('FST-002','3/8in Hex Nut (Box)','HWD','GEN','BOX','VAT18',620,1190,10,'Ceylon Hardware (Pvt) Ltd','SHOP','2026-09-12'),
+--  ('PLB-101','1/2in PVC Elbow','PLB','GEN','EA','VAT18',45,129,50,'Lanka Pipes & Fittings','SHOP','2026-10-10'),
+--  ('PLB-102','PVC Cement 500ml','PLB','GEN','EA','VAT18',410,899,15,'Lanka Pipes & Fittings','SHOP','2026-10-08'),
+--  ('ELC-201','2.5mm² Copper Wire (100m)','ELC','GEN','BDL','VAT18',7800,11990,8,'Hayleys Industrial','BACK','2026-09-20'),
+--  ('ELC-202','13A Twin Socket (UK)','ELC','GEN','EA','VAT18',110,279,40,'Hayleys Industrial','SHOP','2026-10-12'),
+--  ('LMB-301','2x4x8 C24 Timber','LMB','GEN','EA','VAT18',420,749,100,'Browns Hardware','YARD','2026-10-14'),
+--  ('LMB-302','3/4in Plywood 4x8','LMB','GEN','SHT','VAT18',3200,5299,20,'Browns Hardware','YARD','2026-09-28'),
+--  ('PNT-401','Asian Paints White Emulsion 4L','PNT','APAINTS','L','VAT18',1450,3299,20,'Asian Paints Lanka','SHOP','2026-10-09'),
+--  ('PNT-402','Asian Paints Base Tint 4L','PNT','APAINTS','L','VAT18',1800,3899,30,'Asian Paints Lanka','SHOP','2026-10-11'),
+--  ('CEM-501','Tokyo Super Cement 50kg','CEM','TOKYO','BAG','VAT18',2350,2650,80,'Tokyo Cement Distributors','YARD','2026-10-14'),
+--  ('CEM-502','Sanstha Cement 50kg','CEM','TOKYO','BAG','VAT18',2200,2500,40,'Tokyo Cement Distributors','YARD','2026-10-13'),
+--  ('STL-601','12mm Tor Steel Bar (6m)','STL','CEYSTEEL','EA','VAT18',1450,1790,150,'Ceylon Steel Corp','YARD','2026-10-12'),
+--  ('STL-602','Binding Wire 1kg','STL','CEYSTEEL','KG','VAT18',620,950,40,'Ceylon Steel Corp','YARD','2026-10-14'),
+--  ('TLS-701','Bosch Impact Drill 13mm','TLS','BOSCH','EA','VAT18',12500,18900,5,'Hayleys Industrial','BACK','2026-10-13'),
+--  ('TLS-702','Stanley Measuring Tape 5m','TLS','STANLEY','EA','VAT18',620,1290,40,'Sathosa Hardware','SHOP','2026-10-14'),
+--  ('HRD-801','#8 x 1in Wood Screw (Box)','HWD','GEN','BOX','VAT18',480,899,20,'Ceylon Hardware (Pvt) Ltd','SHOP','2026-09-18')
+-- ) AS v(sku,name,cat,brand,uom,tax,cost,price,reorder,supname,loc,last_sold)
+-- JOIN suppliers s ON s.name = v.supname;
 
-INSERT INTO inventory (sku,qty) VALUES
- ('FST-001',42),('FST-002',8),('PLB-101',180),('PLB-102',22),('ELC-201',6),
- ('ELC-202',95),('LMB-301',240),('LMB-302',18),('PNT-401',34),('PNT-402',55),
- ('CEM-501',180),('CEM-502',65),('STL-601',320),('STL-602',88),('TLS-701',7),
- ('TLS-702',88),('HRD-801',12);
+-- INSERT INTO inventory (sku,qty) VALUES
+--  ('FST-001',42),('FST-002',8),('PLB-101',180),('PLB-102',22),('ELC-201',6),
+--  ('ELC-202',95),('LMB-301',240),('LMB-302',18),('PNT-401',34),('PNT-402',55),
+--  ('CEM-501',180),('CEM-502',65),('STL-601',320),('STL-602',88),('TLS-701',7),
+--  ('TLS-702',88),('HRD-801',12);
 
 -- ============================================================
 -- PURCHASE ORDERS & GRN
@@ -372,6 +388,8 @@ CREATE TABLE grns (
     supplier_id INTEGER REFERENCES suppliers(id),
     date_received DATE NOT NULL,
     notes TEXT,
+    paid BOOLEAN NOT NULL DEFAULT FALSE,
+    amount_paid NUMERIC(14,2) NOT NULL DEFAULT 0,
     received_by INTEGER REFERENCES users(id),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -566,6 +584,442 @@ FOR EACH ROW EXECUTE FUNCTION trg_shrink_apply();
 --  ('SHR-2026-0002','2026-09-28','ELC-201',1,'Damage','Electrical',7800,5),
 --  ('SHR-2026-0003','2026-10-05','PLB-101',15,'Miscount','Plumbing',675,5);
 
+CREATE TABLE chart_of_accounts (
+    code TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    account_type TEXT NOT NULL CHECK (account_type IN ('Asset','Liability','Equity','Revenue','COGS','Expense')),
+    parent_code TEXT REFERENCES chart_of_accounts(code),
+    postable BOOLEAN NOT NULL DEFAULT TRUE,
+    contra BOOLEAN NOT NULL DEFAULT FALSE
+);
+
+INSERT INTO chart_of_accounts (code,name,account_type,parent_code,postable,contra) VALUES
+ ('1100','Cash and Cash Equivalents','Asset',NULL,TRUE,FALSE),
+ ('1110','Bank Current Account','Asset',NULL,TRUE,FALSE),
+ ('1200','Accounts Receivable','Asset',NULL,TRUE,FALSE),
+ ('1300','Inventory','Asset',NULL,TRUE,FALSE),
+ ('1400','Cost of Goods Sold','COGS',NULL,TRUE,FALSE),
+ ('1500','Fixed Assets','Asset',NULL,TRUE,FALSE),
+ ('1510','Equipment','Asset','1500',TRUE,FALSE),
+ ('1520','Vehicles','Asset','1500',TRUE,FALSE),
+ ('1690','Accumulated Depreciation','Asset',NULL,TRUE,TRUE),
+ ('2100','Accounts Payable','Liability',NULL,TRUE,FALSE),
+ ('2200','VAT Payable','Liability',NULL,TRUE,FALSE),
+ ('2210','VAT Receivable','Asset',NULL,TRUE,FALSE),
+ ('2300','Customer Deposits','Liability',NULL,TRUE,FALSE),
+ ('2400','Accrued Expenses','Liability',NULL,TRUE,FALSE),
+ ('2500','Other Tax Payable','Liability',NULL,TRUE,FALSE),
+ ('3000','Owners Equity','Equity',NULL,TRUE,FALSE),
+ ('3100','Retained Earnings','Equity',NULL,TRUE,FALSE),
+ ('3200','Owner Drawings','Equity',NULL,TRUE,TRUE),
+ ('4100','Sales Revenue','Revenue',NULL,TRUE,FALSE),
+ ('4200','Service Revenue','Revenue',NULL,TRUE,FALSE),
+ ('4300','Rental Revenue','Revenue',NULL,TRUE,FALSE),
+ ('4400','Other Income','Revenue',NULL,TRUE,FALSE),
+ ('4900','Sales Returns','Revenue',NULL,TRUE,TRUE),
+ ('5100','Operating Expenses','Expense',NULL,TRUE,FALSE),
+ ('6100','Rent Expense','Expense',NULL,TRUE,FALSE),
+ ('6200','Utilities Expense','Expense',NULL,TRUE,FALSE),
+ ('6300','Travel Expense','Expense',NULL,TRUE,FALSE),
+ ('6400','Supplies Expense','Expense',NULL,TRUE,FALSE),
+ ('6500','Depreciation Expense','Expense',NULL,TRUE,FALSE),
+ ('6600','Shrinkage Expense','Expense',NULL,TRUE,FALSE),
+ ('6700','Bank Charges','Expense',NULL,TRUE,FALSE),
+ ('6800','Repairs and Maintenance','Expense',NULL,TRUE,FALSE),
+ ('6900','Other Expense','Expense',NULL,TRUE,FALSE)
+ ON CONFLICT (code) DO NOTHING;
+
+CREATE TABLE journal_entries (
+    id TEXT PRIMARY KEY,
+    entry_date DATE NOT NULL,
+    description TEXT NOT NULL,
+    source TEXT NOT NULL,
+    ref TEXT,
+    created_by INTEGER REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE journal_lines (
+    id SERIAL PRIMARY KEY,
+    je_id TEXT NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+    account_code TEXT NOT NULL REFERENCES chart_of_accounts(code),
+    debit NUMERIC(14,2) NOT NULL DEFAULT 0,
+    credit NUMERIC(14,2) NOT NULL DEFAULT 0
+);
+
+CREATE TABLE expense_categories (
+    code TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    account_code TEXT NOT NULL DEFAULT '5100' REFERENCES chart_of_accounts(code)
+);
+
+INSERT INTO expense_categories (code, name, account_code) VALUES
+ ('ELEC', 'Electricity', '6200'),
+ ('RENT', 'Rent', '6100'),
+ ('TRVL', 'Travel', '6300'),
+ ('SUPP', 'Supplies', '6400')
+ON CONFLICT (code) DO NOTHING;
+
+CREATE TABLE expenses (
+    id TEXT PRIMARY KEY,
+    category_code TEXT REFERENCES expense_categories(code),
+    expense_date DATE NOT NULL,
+    amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+    vendor TEXT,
+    notes TEXT,
+    posted BOOLEAN NOT NULL DEFAULT FALSE,
+    created_by INTEGER REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE fixed_assets (
+    id SERIAL PRIMARY KEY,
+    code TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    cost NUMERIC(14,2) NOT NULL DEFAULT 0,
+    life_years INTEGER NOT NULL DEFAULT 1,
+    salvage NUMERIC(14,2) NOT NULL DEFAULT 0,
+    accumulated_depreciation NUMERIC(14,2) NOT NULL DEFAULT 0,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE budgets (
+    period TEXT NOT NULL,
+    account_code TEXT NOT NULL REFERENCES chart_of_accounts(code),
+    amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+    PRIMARY KEY (period, account_code)
+);
+
+CREATE TABLE period_locks (
+    lock_through_date DATE PRIMARY KEY,
+    created_by INTEGER REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE bank_reconciliations (
+    id SERIAL PRIMARY KEY,
+    je_line_id INTEGER NOT NULL REFERENCES journal_lines(id),
+    reconciled_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    reconciled_by INTEGER REFERENCES users(id),
+    UNIQUE (je_line_id)
+);
+
+CREATE OR REPLACE FUNCTION fn_post_journal(
+    p_entry_date DATE,
+    p_description TEXT,
+    p_source TEXT,
+    p_ref TEXT,
+    p_lines JSONB,
+    p_created_by INTEGER
+) RETURNS TEXT AS $$
+DECLARE
+    v_je_id TEXT;
+    v_debit NUMERIC(14,2) := 0;
+    v_credit NUMERIC(14,2) := 0;
+    v_line JSONB;
+BEGIN
+    IF jsonb_typeof(COALESCE(p_lines, '[]'::jsonb)) <> 'array'
+       OR jsonb_array_length(COALESCE(p_lines, '[]'::jsonb)) < 2 THEN
+        RAISE EXCEPTION 'Journal entry requires at least two lines.';
+    END IF;
+
+    PERFORM pg_advisory_xact_lock(7319422);
+    IF EXISTS (SELECT 1 FROM period_locks WHERE lock_through_date >= p_entry_date) THEN
+        RAISE EXCEPTION 'Period is locked for backdated journal entries.' USING HINT = 'Use a date after the latest lock date.';
+    END IF;
+
+    FOR v_line IN SELECT * FROM jsonb_array_elements(COALESCE(p_lines, '[]'::jsonb)) LOOP
+        IF COALESCE((v_line->>'debit')::NUMERIC, 0) < 0
+           OR COALESCE((v_line->>'credit')::NUMERIC, 0) < 0
+           OR (COALESCE((v_line->>'debit')::NUMERIC, 0) > 0
+               AND COALESCE((v_line->>'credit')::NUMERIC, 0) > 0) THEN
+            RAISE EXCEPTION 'Journal line amounts must be non-negative and either debit or credit.';
+        END IF;
+        v_debit := v_debit + COALESCE((v_line->>'debit')::NUMERIC, 0);
+        v_credit := v_credit + COALESCE((v_line->>'credit')::NUMERIC, 0);
+    END LOOP;
+
+    IF v_debit <= 0 OR ABS(v_debit - v_credit) > 0.009 THEN
+        RAISE EXCEPTION 'Journal entry must balance.' USING HINT = 'Debits and credits must match.';
+    END IF;
+
+    v_je_id := fn_next_number('JE');
+
+    INSERT INTO journal_entries (id, entry_date, description, source, ref, created_by)
+    VALUES (v_je_id, p_entry_date, p_description, p_source, p_ref, p_created_by);
+
+    INSERT INTO journal_lines (je_id, account_code, debit, credit)
+    SELECT v_je_id,
+           (line->>'account_code')::TEXT,
+           COALESCE((line->>'debit')::NUMERIC, 0),
+           COALESCE((line->>'credit')::NUMERIC, 0)
+    FROM jsonb_array_elements(COALESCE(p_lines, '[]'::jsonb)) AS line;
+
+    RETURN v_je_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION fn_post_sale_finance(p_sale_id TEXT, p_created_by INTEGER DEFAULT NULL)
+RETURNS TEXT AS $$
+DECLARE
+    v_sale sales%ROWTYPE;
+    v_revenue NUMERIC(14,2);
+    v_tax NUMERIC(14,2);
+    v_cogs NUMERIC(14,2);
+    v_lines JSONB;
+    v_je_id TEXT;
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext('finance:POS:' || p_sale_id));
+    SELECT id INTO v_je_id
+      FROM journal_entries
+     WHERE source = 'POS' AND ref = p_sale_id
+     LIMIT 1;
+    IF v_je_id IS NOT NULL THEN
+        RETURN v_je_id;
+    END IF;
+
+    SELECT * INTO v_sale FROM sales WHERE id = p_sale_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Sale % not found.', p_sale_id;
+    END IF;
+
+    SELECT COALESCE(v_sale.subtotal - v_sale.discount, 0),
+           COALESCE(v_sale.tax, 0),
+           COALESCE(SUM(sl.qty * sl.cost_at_sale), 0)
+      INTO v_revenue, v_tax, v_cogs
+    FROM sale_lines sl
+    WHERE sl.sale_id = p_sale_id;
+
+    v_lines := jsonb_build_array(
+        jsonb_build_object('account_code',
+          CASE WHEN v_sale.payment_method = 'On Account (B2B)' THEN '1200' ELSE '1100' END,
+          'debit', v_sale.total, 'credit', 0),
+        jsonb_build_object('account_code','4100','debit', 0, 'credit', v_revenue),
+        jsonb_build_object('account_code','2200','debit', 0, 'credit', v_tax),
+        jsonb_build_object('account_code','1400','debit', v_cogs, 'credit', 0),
+        jsonb_build_object('account_code','1300','debit', 0, 'credit', v_cogs)
+    );
+
+    v_je_id := fn_post_journal(
+      v_sale.sale_date, 'POS sale ' || v_sale.id, 'POS', v_sale.id, v_lines,
+      COALESCE(p_created_by, v_sale.cashier_id)
+    );
+    RETURN v_je_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION fn_post_grn_finance(p_grn_id TEXT)
+RETURNS TEXT AS $$
+DECLARE
+    v_lines JSONB;
+    v_total NUMERIC(14,2);
+    v_vat NUMERIC(14,2);
+    v_date DATE;
+    v_user INTEGER;
+    v_je_id TEXT;
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext('finance:GRN:' || p_grn_id));
+    SELECT id INTO v_je_id
+      FROM journal_entries
+     WHERE source = 'GRN' AND ref = p_grn_id
+     LIMIT 1;
+    IF v_je_id IS NOT NULL THEN
+        RETURN v_je_id;
+    END IF;
+
+    SELECT g.date_received, g.received_by,
+           COALESCE(SUM(gl.qty * gl.cost), 0),
+           COALESCE(SUM(gl.qty * gl.cost * COALESCE(t.rate, 0) / 100), 0)
+      INTO v_date, v_user, v_total, v_vat
+      FROM grns g
+      LEFT JOIN grn_lines gl ON gl.grn_id = g.id
+      LEFT JOIN items i ON i.sku = gl.sku
+      LEFT JOIN tax_codes t ON t.code = i.tax_code
+     WHERE g.id = p_grn_id
+     GROUP BY g.id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'GRN % not found.', p_grn_id;
+    END IF;
+
+    v_lines := jsonb_build_array(
+        jsonb_build_object('account_code','1300','debit', v_total, 'credit', 0),
+        jsonb_build_object('account_code','2210','debit', v_vat, 'credit', 0),
+        jsonb_build_object('account_code','2100','debit', 0, 'credit', v_total + v_vat)
+    );
+    v_je_id := fn_post_journal(v_date, 'GRN ' || p_grn_id, 'GRN', p_grn_id, v_lines, v_user);
+    RETURN v_je_id;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION trg_grn_lines_finance()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_grn_id TEXT;
+BEGIN
+    FOR v_grn_id IN SELECT DISTINCT grn_id FROM inserted_grn_lines LOOP
+        PERFORM fn_post_grn_finance(v_grn_id);
+    END LOOP;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION fn_post_service_finance(p_service_id TEXT)
+RETURNS TEXT AS $$
+DECLARE
+    v_date DATE;
+    v_price NUMERIC(14,2);
+    v_je_id TEXT;
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext('finance:SERVICE:' || p_service_id));
+    SELECT id INTO v_je_id FROM journal_entries
+     WHERE source = 'SERVICE' AND ref = p_service_id LIMIT 1;
+    IF v_je_id IS NOT NULL THEN RETURN v_je_id; END IF;
+
+    SELECT date_in, price INTO v_date, v_price
+      FROM service_tickets WHERE id = p_service_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Service ticket % not found.', p_service_id; END IF;
+    IF v_price <= 0 THEN RETURN NULL; END IF;
+
+    RETURN fn_post_journal(v_date, 'Service ' || p_service_id, 'SERVICE', p_service_id,
+      jsonb_build_array(
+        jsonb_build_object('account_code','1200','debit',v_price,'credit',0),
+        jsonb_build_object('account_code','4200','debit',0,'credit',v_price)
+      ), NULL);
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION trg_service_finance()
+RETURNS TRIGGER AS $$
+BEGIN
+    PERFORM fn_post_service_finance(NEW.id);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION fn_post_rental_finance(p_rental_id TEXT)
+RETURNS TEXT AS $$
+DECLARE
+    v_date DATE;
+    v_amount NUMERIC(14,2);
+    v_je_id TEXT;
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtext('finance:RENTAL:' || p_rental_id));
+    SELECT id INTO v_je_id FROM journal_entries
+     WHERE source = 'RENTAL' AND ref = p_rental_id LIMIT 1;
+    IF v_je_id IS NOT NULL THEN RETURN v_je_id; END IF;
+
+    SELECT date_out,
+           (GREATEST(date_due - date_out, 1) * rate_per_day) + late_fee
+      INTO v_date, v_amount
+      FROM rental_contracts WHERE id = p_rental_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Rental contract % not found.', p_rental_id; END IF;
+    IF v_amount <= 0 THEN RETURN NULL; END IF;
+
+    RETURN fn_post_journal(v_date, 'Rental ' || p_rental_id, 'RENTAL', p_rental_id,
+      jsonb_build_array(
+        jsonb_build_object('account_code','1200','debit',v_amount,'credit',0),
+        jsonb_build_object('account_code','4300','debit',0,'credit',v_amount)
+      ), NULL);
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION trg_rental_finance()
+RETURNS TRIGGER AS $$
+BEGIN
+    PERFORM fn_post_rental_finance(NEW.id);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION trg_invoice_payment_finance()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_amount NUMERIC(14,2);
+BEGIN
+    v_amount := NEW.amount_paid - OLD.amount_paid;
+    IF v_amount <= 0 THEN RETURN NEW; END IF;
+    PERFORM fn_post_journal(CURRENT_DATE, 'AR receipt ' || NEW.id, 'AR', NEW.id,
+      jsonb_build_array(
+        jsonb_build_object('account_code','1100','debit',v_amount,'credit',0),
+        jsonb_build_object('account_code','1200','debit',0,'credit',v_amount)
+      ), NULL);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE OR REPLACE FUNCTION trg_expense_finance()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_account_code TEXT;
+BEGIN
+    IF NOT NEW.posted THEN RETURN NEW; END IF;
+    SELECT account_code INTO v_account_code
+      FROM expense_categories WHERE code = NEW.category_code;
+    IF v_account_code IS NULL THEN
+        RAISE EXCEPTION 'Expense category % has no ledger account.', NEW.category_code;
+    END IF;
+    PERFORM fn_post_journal(NEW.expense_date, 'Expense ' || NEW.id, 'EXPENSE', NEW.id,
+      jsonb_build_array(
+        jsonb_build_object('account_code',v_account_code,'debit',NEW.amount,'credit',0),
+        jsonb_build_object('account_code','1100','debit',0,'credit',NEW.amount)
+      ), NEW.created_by);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_sales_finance ON sales;
+DROP TRIGGER IF EXISTS trg_grn_finance ON grns;
+DROP TRIGGER IF EXISTS trg_grn_lines_finance ON grn_lines;
+DROP TRIGGER IF EXISTS trg_service_finance ON service_tickets;
+DROP TRIGGER IF EXISTS trg_rental_finance ON rental_contracts;
+DROP TRIGGER IF EXISTS trg_invoice_payment_finance ON invoices;
+DROP TRIGGER IF EXISTS trg_expense_finance ON expenses;
+
+CREATE OR REPLACE FUNCTION trg_shrink_finance()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_value NUMERIC(14,2);
+    v_lines JSONB;
+BEGIN
+    v_value := COALESCE(NEW.value, 0);
+    IF v_value <= 0 THEN RETURN NEW; END IF;
+    v_lines := jsonb_build_array(
+        jsonb_build_object('account_code','6600','debit', v_value, 'credit', 0),
+        jsonb_build_object('account_code','1300','debit', 0, 'credit', v_value)
+    );
+    PERFORM fn_post_journal(NEW.incident_date, 'Shrink incident ' || NEW.id, 'SHRINK', NEW.id, v_lines, NEW.logged_by);
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_grn_lines_finance
+AFTER INSERT ON grn_lines
+REFERENCING NEW TABLE AS inserted_grn_lines
+FOR EACH STATEMENT EXECUTE FUNCTION trg_grn_lines_finance();
+
+CREATE TRIGGER trg_shrink_finance
+AFTER INSERT ON shrink_incidents
+FOR EACH ROW EXECUTE FUNCTION trg_shrink_finance();
+
+CREATE TRIGGER trg_service_finance
+AFTER INSERT ON service_tickets
+FOR EACH ROW EXECUTE FUNCTION trg_service_finance();
+
+CREATE TRIGGER trg_rental_finance
+AFTER INSERT ON rental_contracts
+FOR EACH ROW EXECUTE FUNCTION trg_rental_finance();
+
+CREATE TRIGGER trg_invoice_payment_finance
+AFTER UPDATE OF amount_paid ON invoices
+FOR EACH ROW
+WHEN (NEW.amount_paid > OLD.amount_paid)
+EXECUTE FUNCTION trg_invoice_payment_finance();
+
+CREATE TRIGGER trg_expense_finance
+AFTER INSERT ON expenses
+FOR EACH ROW EXECUTE FUNCTION trg_expense_finance();
+
 COMMIT;
 
 -- ============================================================
@@ -692,6 +1146,7 @@ BEGIN
         WHERE c.id = p_customer_id;
     END IF;
 
+    PERFORM fn_post_sale_finance(v_sale_id, p_cashier_id);
     RETURN v_sale_id;
 END;
 $$ LANGUAGE plpgsql;

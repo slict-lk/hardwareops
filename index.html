@@ -162,6 +162,16 @@
   .toolbar input:focus, .toolbar select:focus {
     outline: none; border-color: var(--orange);
   }
+  .fin-tabs {
+    display: flex; gap: 6px; flex-wrap: wrap; margin: 18px 0;
+    border-bottom: 1px solid var(--border); padding-bottom: 10px;
+  }
+  .fin-tabs button {
+    background: var(--gray); color: var(--light); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 11px; cursor: pointer; font-size: 12px;
+  }
+  .fin-tabs button.active { border-color: var(--gold); color: var(--gold); }
+  .fin-content { min-height: 180px; }
 
   .form-row {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
@@ -418,6 +428,7 @@
   <button data-panel="shrink">Shrinkage</button>
   <button data-panel="gmroi">GMROI</button>
   <button data-panel="analytics" style="border-left:2px solid var(--gold);margin-left:6px;padding-left:14px;">📊 Sales Analytics</button>
+  <button data-panel="finance" style="border-left:2px solid var(--gold);margin-left:6px;padding-left:14px;color:var(--gold);">💰 Finance</button>
   <div class="divider"></div>
   <button data-panel="masters" style="border-color:var(--purple);color:var(--purple);">⚙ Masters</button>
 </nav>
@@ -635,6 +646,29 @@
 
     <div class="grid" id="anKpis"></div>
     <div id="anContent"></div>
+  </section>
+
+  <section class="panel" id="finance">
+    <h2>💰 Finance Overview</h2>
+    <p class="sub">General ledger, financial reports, receivables, payables, and period controls.</p>
+    <div class="fin-tabs" id="financeTabs">
+      <button data-fin-view="overview" class="active">Overview</button>
+      <button data-fin-view="accounts">Chart of Accounts</button>
+      <button data-fin-view="journal">Journal</button>
+      <button data-fin-view="ledger">Ledger</button>
+      <button data-fin-view="trial-balance">Trial Balance</button>
+      <button data-fin-view="pnl">P&amp;L</button>
+      <button data-fin-view="balance-sheet">Balance Sheet</button>
+      <button data-fin-view="cash-flow">Cash Flow</button>
+      <button data-fin-view="bank-recon">Bank &amp; Recon</button>
+      <button data-fin-view="aging">AR/AP Aging</button>
+      <button data-fin-view="expenses">Expenses</button>
+      <button data-fin-view="vat">VAT Return</button>
+      <button data-fin-view="fixed-assets">Fixed Assets</button>
+      <button data-fin-view="budget">Budget</button>
+      <button data-fin-view="period-close">Period Close</button>
+    </div>
+    <div id="financeContent" class="fin-content"></div>
   </section>
 
   <section class="panel" id="masters">
@@ -925,8 +959,8 @@ let ROLES = {
 
 const PERMISSION_KEYS = [
   "dashboard", "pos", "inventory", "po", "grn",
-  "services", "rentals", "b2b", "shrink", "gmroi", "analytics",
-  "masters", "masters_edit", "numberseries", "users_manage"
+  "services", "rentals", "b2b", "shrink", "gmroi", "analytics", "finance",
+  "masters", "masters_edit", "numberseries", "users_manage", "finance_edit"
 ];
 
 let rolePermissions = {};
@@ -1299,6 +1333,7 @@ async function bootstrap() {
   if (can("users_manage")) users = await api("/api/users?includeInactive=true");
 
   wireNav();
+  wireFinanceTabs();
   wireMastersTabs();
 
   renderUserChip();
@@ -1339,6 +1374,7 @@ async function refreshNumberSeries(){ numberSeries  = await api("/api/number-ser
 
 function renderAll() {
   renderDashboard();
+  renderFinance();
   renderPOS();
   renderInventory();
   renderPO();
@@ -1442,6 +1478,7 @@ function wireNav() {
       $(btn.dataset.panel).classList.add("active");
       window.scrollTo({top:0, behavior:"smooth"});
       if (btn.dataset.panel === "analytics") renderAnalytics();
+      if (btn.dataset.panel === "finance") renderFinance();
     });
   });
 }
@@ -1510,6 +1547,347 @@ function renderDashboard() {
       (supplierMaster.find(s=>s.name===i.supplier)?.lead || "—") + " days"
     ])
   ]) : "<p style='color:#888;font-size:13px;'>No items below reorder point.</p>";
+}
+
+async function renderFinance() {
+  await renderFinanceView(document.querySelector("#financeTabs button.active")?.dataset.finView || "overview");
+}
+
+const finEsc = value => String(value ?? "").replace(/[&<>"']/g, char => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+})[char]);
+
+function finTable(headers, rows) {
+  if (!rows.length) return "<p style='color:#888;font-size:13px;'>No records found.</p>";
+  return table([headers, ...rows]);
+}
+
+function finAmount(value) {
+  return money(Number(value || 0));
+}
+
+function finPeriodBounds(period) {
+  const [year, month] = period.split("-").map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+  return { from: `${period}-01`, to: `${period}-${String(lastDay).padStart(2, "0")}` };
+}
+
+function finOptions(accounts, selected = "") {
+  return accounts.map(account =>
+    `<option value="${finEsc(account.code)}" ${account.code === selected ? "selected" : ""}>${finEsc(account.code)} — ${finEsc(account.name)}</option>`
+  ).join("");
+}
+
+async function renderFinanceView(view) {
+  const content = $("financeContent");
+  if (!can("finance")) {
+    content.innerHTML = "<p style='color:#888;font-size:13px;'>Finance access is denied for this role.</p>";
+    return;
+  }
+  document.querySelectorAll("#financeTabs button").forEach(button =>
+    button.classList.toggle("active", button.dataset.finView === view)
+  );
+  content.innerHTML = "<p style='color:#888;font-size:13px;'>Loading finance data…</p>";
+  try {
+    let data;
+    let accounts;
+    switch (view) {
+      case "overview": {
+        const [tb, bs, pnl, journal] = await Promise.all([
+          api("/api/finance/trial-balance"), api("/api/finance/balance-sheet"),
+          api("/api/finance/pnl"), api("/api/finance/journal")
+        ]);
+        const debitTotal = tb.reduce((sum, row) => sum + Number(row.debit || 0), 0);
+        const creditTotal = tb.reduce((sum, row) => sum + Number(row.credit || 0), 0);
+        const diff = Math.abs(debitTotal - creditTotal);
+        const balanceDiff = Number(bs.assets) - Number(bs.liabilities) - Number(bs.equity);
+        content.innerHTML = `
+          <div class="grid">
+            <div class="kpi"><div class="label">Revenue</div><div class="value green">${finAmount(pnl.revenue)}</div><div class="meta">Posted ledger activity</div></div>
+            <div class="kpi"><div class="label">Net Profit</div><div class="value ${Number(pnl.net_profit) >= 0 ? "green" : "red"}">${finAmount(pnl.net_profit)}</div><div class="meta">Revenue less COGS and expenses</div></div>
+            <div class="kpi"><div class="label">Trial Balance</div><div class="value ${diff < 0.01 ? "green" : "red"}">${diff < 0.01 ? "Balanced" : "Mismatch"}</div><div class="meta">Dr ${finAmount(debitTotal)} · Cr ${finAmount(creditTotal)}</div></div>
+            <div class="kpi"><div class="label">Balance Sheet Check</div><div class="value ${Math.abs(balanceDiff) < 0.01 ? "green" : "red"}">${Math.abs(balanceDiff) < 0.01 ? "Balanced" : "Mismatch"}</div><div class="meta">A − L − E: ${finAmount(balanceDiff)}</div></div>
+          </div>
+          <h3 style="margin:18px 0 10px;">Recent Journal Activity</h3>
+          ${finTable(["Date","Journal","Description","Source","Account","Debit","Credit"], journal.slice(0, 25).map(row =>
+            [finEsc(row.date), finEsc(row.id), finEsc(row.description), finEsc(row.source), finEsc(row.account_code || "—"), finAmount(row.debit), finAmount(row.credit)]
+          ))}`;
+        return;
+      }
+      case "accounts":
+        data = await api("/api/finance/accounts");
+        content.innerHTML = finTable(["Code","Account","Type","Parent","Postable","Contra"], data.map(row =>
+          [finEsc(row.code), finEsc(row.name), finEsc(row.type), finEsc(row.parent_code || "—"), row.postable ? "Yes" : "No", row.contra ? "Yes" : "No"]
+        ));
+        return;
+      case "journal":
+        [accounts, data] = await Promise.all([api("/api/finance/accounts"), api("/api/finance/journal")]);
+        content.innerHTML = `
+          ${can("finance_edit") ? `<form class="form-row" data-fin-form="journal">
+            <label>Date<input name="date" type="date" required value="${new Date().toISOString().slice(0,10)}"></label>
+            <label>Description<input name="description" required maxlength="180"></label>
+            <label>Debit account<select name="debit_account">${finOptions(accounts)}</select></label>
+            <label>Debit amount<input name="debit" type="number" min="0.01" step="0.01" required></label>
+            <label>Credit account<select name="credit_account">${finOptions(accounts)}</select></label>
+            <label>Credit amount<input name="credit" type="number" min="0.01" step="0.01" required></label>
+            <button class="btn" type="submit">Post Journal</button>
+          </form>` : ""}
+          ${finTable(["Date","Journal","Description","Source","Ref","Account","Debit","Credit"], data.map(row =>
+            [finEsc(row.date), finEsc(row.id), finEsc(row.description), finEsc(row.source), finEsc(row.ref || "—"), finEsc(row.account_code || "—"), finAmount(row.debit), finAmount(row.credit)]
+          ))}`;
+        return;
+      case "ledger":
+        accounts = await api("/api/finance/accounts");
+        content.innerHTML = `<div class="toolbar"><label>Account <select id="finLedgerAccount">${finOptions(accounts)}</select></label><button class="btn" id="finLedgerRefresh">Refresh</button></div><div id="finLedgerRows"></div>`;
+        await renderFinanceLedger();
+        return;
+      case "trial-balance":
+        data = await api("/api/finance/trial-balance");
+        content.innerHTML = finTable(["Code","Account","Type","Debit","Credit","Net Balance"], data.map(row =>
+          [finEsc(row.code), finEsc(row.name), finEsc(row.type), finAmount(row.debit), finAmount(row.credit), finAmount(row.balance)]
+        ));
+        return;
+      case "pnl":
+        data = await api("/api/finance/pnl");
+        content.innerHTML = `<div class="grid">
+          <div class="kpi"><div class="label">Revenue</div><div class="value green">${finAmount(data.revenue)}</div></div>
+          <div class="kpi"><div class="label">Cost of Goods Sold</div><div class="value">${finAmount(data.cogs)}</div></div>
+          <div class="kpi"><div class="label">Expenses</div><div class="value">${finAmount(data.expenses)}</div></div>
+          <div class="kpi"><div class="label">Net Profit</div><div class="value ${Number(data.net_profit) >= 0 ? "green" : "red"}">${finAmount(data.net_profit)}</div></div>
+        </div>`;
+        return;
+      case "balance-sheet":
+        data = await api("/api/finance/balance-sheet");
+        {
+          const diff = Number(data.assets) - Number(data.liabilities) - Number(data.equity);
+          content.innerHTML = `<div class="grid">
+            <div class="kpi"><div class="label">Assets</div><div class="value">${finAmount(data.assets)}</div></div>
+            <div class="kpi"><div class="label">Liabilities</div><div class="value">${finAmount(data.liabilities)}</div></div>
+            <div class="kpi"><div class="label">Equity</div><div class="value">${finAmount(data.equity)}</div></div>
+            <div class="kpi"><div class="label">A − L − E Check</div><div class="value ${Math.abs(diff) < 0.01 ? "green" : "red"}">${Math.abs(diff) < 0.01 ? "Balanced" : "Mismatch"}</div><div class="meta">${finAmount(diff)}</div></div>
+          </div>`;
+        }
+        return;
+      case "cash-flow":
+        {
+          const period = new Date().toISOString().slice(0, 7);
+          const bounds = finPeriodBounds(period);
+          data = await api(`/api/finance/cash-flow?${new URLSearchParams(bounds)}`);
+          content.innerHTML = `<form class="toolbar" data-fin-form="cash-period"><label>Period <input name="period" type="month" value="${period}" required></label><button class="btn" type="submit">Run Cash Flow</button></form>
+          <div class="grid fin-period-result">
+          <div class="kpi"><div class="label">Cash Inflow</div><div class="value green">${finAmount(data.cash_inflow)}</div></div>
+          <div class="kpi"><div class="label">Cash Outflow</div><div class="value">${finAmount(data.cash_outflow)}</div></div>
+          <div class="kpi"><div class="label">Net Cash Movement</div><div class="value">${finAmount(Number(data.cash_inflow) - Number(data.cash_outflow))}</div></div>
+        </div>`;
+          return;
+        }
+      case "bank-recon": {
+        const [journal, reconciled] = await Promise.all([api("/api/finance/journal"), api("/api/finance/bank-recon")]);
+        const done = new Set(reconciled.map(row => Number(row.je_line_id)));
+        content.innerHTML = finTable(["Date","Journal","Description","Debit","Credit","Status"], journal.filter(row =>
+          ["1100", "1110"].includes(row.account_code) && row.line_id
+        ).map(row => [
+          finEsc(row.date), finEsc(row.id), finEsc(row.description), finAmount(row.debit), finAmount(row.credit),
+          done.has(Number(row.line_id)) ? "Reconciled" : `<button class="btn" data-fin-action="reconcile" data-line-id="${Number(row.line_id)}">Mark reconciled</button>`
+        ]));
+        return;
+      }
+      case "aging": {
+        const [ar, ap] = await Promise.all([api("/api/finance/aging/ar"), api("/api/finance/aging/ap")]);
+        content.innerHTML = `<h3 style="margin:10px 0;">Accounts Receivable</h3>
+          ${finTable(["Invoice","Customer","Due","Total","Paid","Outstanding","Bucket","Action"], ar.map(row => [
+            finEsc(row.id), finEsc(row.customer), finEsc(row.due_date), finAmount(row.total), finAmount(row.amount_paid),
+            finAmount(row.outstanding), finEsc(row.bucket),
+            Number(row.outstanding) > 0 ? `<button class="btn" data-fin-action="receive" data-record-id="${finEsc(row.id)}">Receive</button>` : "—"
+          ]))}
+          <h3 style="margin:22px 0 10px;">Accounts Payable</h3>
+          ${finTable(["GRN","Supplier","Date Received","Total","Paid","Outstanding","Bucket","Action"], ap.map(row => [
+            finEsc(row.id), finEsc(row.supplier || "—"), finEsc(row.date_received || "—"), finAmount(row.total), finAmount(row.amount_paid),
+            finAmount(row.outstanding), finEsc(row.bucket),
+            Number(row.outstanding) > 0 ? `<button class="btn" data-fin-action="pay" data-record-id="${finEsc(row.id)}">Pay</button>` : "—"
+          ]))}`;
+        return;
+      }
+      case "expenses":
+        {
+        const [expenses, categories] = await Promise.all([
+          api("/api/finance/expenses"), api("/api/finance/expense-categories")
+        ]);
+        content.innerHTML = `${can("finance_edit") ? `<form class="form-row" data-fin-form="expense">
+          <label>Date<input name="expense_date" type="date" required value="${new Date().toISOString().slice(0,10)}"></label>
+          <label>Category<select name="category_code">${categories.map(category =>
+            `<option value="${finEsc(category.code)}">${finEsc(category.name)} (${finEsc(category.account_code)})</option>`
+          ).join("")}</select></label>
+          <label>Amount<input name="amount" type="number" min="0.01" step="0.01" required></label>
+          <label>Vendor<input name="vendor" maxlength="120"></label>
+          <label>Notes<input name="notes" maxlength="240"></label>
+          <button class="btn" type="submit">Post Expense</button>
+        </form>` : ""}
+        ${finTable(["Voucher","Date","Category","Amount","Vendor","Posted"], expenses.map(row =>
+          [finEsc(row.id), finEsc(row.expense_date), finEsc(row.category_code), finAmount(row.amount), finEsc(row.vendor || "—"), row.posted ? "Yes" : "No"]
+        ))}`;
+        return;
+        }
+      case "vat":
+        {
+          const period = new Date().toISOString().slice(0, 7);
+          const bounds = finPeriodBounds(period);
+          data = await api(`/api/finance/vat-return?${new URLSearchParams(bounds)}`);
+          content.innerHTML = `<form class="toolbar" data-fin-form="vat-period"><label>Filing month <input name="period" type="month" value="${period}" required></label><button class="btn" type="submit">Calculate Return</button></form>
+          <div class="grid fin-period-result">
+          <div class="kpi"><div class="label">Output VAT</div><div class="value">${finAmount(data.output_vat)}</div></div>
+          <div class="kpi"><div class="label">Input VAT</div><div class="value">${finAmount(data.input_vat)}</div></div>
+          <div class="kpi"><div class="label">Net VAT</div><div class="value ${Number(data.net_vat) >= 0 ? "yellow" : "green"}">${finAmount(data.net_vat)}</div><div class="meta">Working paper from posted ledger entries</div></div>
+        </div>`;
+          return;
+        }
+      case "fixed-assets":
+        data = await api("/api/finance/fixed-assets");
+        content.innerHTML = `${can("finance_edit") ? `<form class="form-row" data-fin-form="asset">
+          <label>Asset code<input name="code" required maxlength="40"></label>
+          <label>Name<input name="name" required maxlength="120"></label>
+          <label>Cost<input name="cost" type="number" min="0.01" step="0.01" required></label>
+          <label>Life (years)<input name="life_years" type="number" min="1" step="1" required></label>
+          <label>Salvage value<input name="salvage" type="number" min="0" step="0.01" value="0"></label>
+          <button class="btn" type="submit">Add Asset</button>
+        </form>
+        <form class="toolbar" data-fin-form="depreciate"><label>Post depreciation period <input name="period" type="month" required></label><button class="btn" type="submit">Post Depreciation</button></form>` : ""}
+        ${finTable(["Code","Asset","Cost","Life (years)","Salvage","Accumulated Depreciation","Active"], data.map(row =>
+          [finEsc(row.code), finEsc(row.name), finAmount(row.cost), finEsc(row.life_years), finAmount(row.salvage), finAmount(row.accumulated_depreciation), row.active ? "Yes" : "No"]
+        ))}`;
+        return;
+      case "budget":
+        [accounts, data] = await Promise.all([api("/api/finance/accounts"), api("/api/finance/budgets")]);
+        content.innerHTML = `${can("finance_edit") ? `<form class="form-row" data-fin-form="budget">
+          <label>Period<input name="period" type="month" required></label>
+          <label>Account<select name="code">${finOptions(accounts)}</select></label>
+          <label>Budget amount<input name="amount" type="number" min="0" step="0.01" required></label>
+          <button class="btn" type="submit">Save Budget</button>
+        </form>` : ""}
+        ${finTable(["Period","Account","Budget"], data.map(row =>
+          [finEsc(row.period), finEsc(row.account_code), finAmount(row.amount)]
+        ))}`;
+        return;
+      case "period-close":
+        data = await api("/api/finance/period-lock");
+        content.innerHTML = `${can("finance_edit") ? `<form class="toolbar" data-fin-form="period-lock">
+          <label>Lock through date <input name="lock_through_date" type="date" required></label>
+          <button class="btn" type="submit">Lock Period</button>
+        </form>` : ""}
+        ${finTable(["Locked Through","Created By","Created At"], data.map(row =>
+          [finEsc(row.lock_through_date), finEsc(row.created_by ?? "—"), finEsc(row.created_at)]
+        ))}`;
+        return;
+      default:
+        content.innerHTML = "<p style='color:#888;font-size:13px;'>Select a finance view.</p>";
+    }
+  } catch (err) {
+    content.innerHTML = `<p style="color:var(--red);font-size:13px;">Unable to load finance data: ${finEsc(err.message)}</p>`;
+  }
+}
+
+async function renderFinanceLedger() {
+  const account = $("finLedgerAccount")?.value;
+  if (!account) return;
+  const rows = await api(`/api/finance/ledger/${encodeURIComponent(account)}`);
+  $("finLedgerRows").innerHTML = finTable(["Date","Description","Source","Debit","Credit"], rows.map(row =>
+    [finEsc(row.date), finEsc(row.description), finEsc(row.source), finAmount(row.debit), finAmount(row.credit)]
+  ));
+}
+
+function wireFinanceTabs() {
+  if ($("financeTabs").dataset.wired === "true") return;
+  $("financeTabs").dataset.wired = "true";
+  $("financeTabs").addEventListener("click", event => {
+    const button = event.target.closest("[data-fin-view]");
+    if (button) renderFinanceView(button.dataset.finView);
+  });
+  $("financeContent").addEventListener("change", event => {
+    if (event.target.id === "finLedgerAccount") {
+      renderFinanceLedger().catch(err => toast(err.message, "err"));
+    }
+  });
+  $("financeContent").addEventListener("click", async event => {
+    const button = event.target.closest("[data-fin-action]");
+    if (!button) return;
+    try {
+      if (button.dataset.finAction === "receive") {
+        await api(`/api/finance/aging/ar/${encodeURIComponent(button.dataset.recordId)}/receive`, { method: "POST", body: "{}" });
+      } else if (button.dataset.finAction === "pay") {
+        await api(`/api/finance/aging/ap/${encodeURIComponent(button.dataset.recordId)}/pay`, { method: "POST", body: "{}" });
+      } else if (button.dataset.finAction === "reconcile") {
+        await api(`/api/finance/bank-recon/${encodeURIComponent(button.dataset.lineId)}`, { method: "POST", body: "{}" });
+      }
+      toast("Finance transaction recorded.", "ok");
+      await renderFinanceView(document.querySelector("#financeTabs button.active")?.dataset.finView || "overview");
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  });
+  $("financeContent").addEventListener("submit", async event => {
+    const form = event.target.closest("[data-fin-form]");
+    if (!form) return;
+    event.preventDefault();
+    if (!can("finance_edit")) return toast("Permission denied.", "err");
+    const values = Object.fromEntries(new FormData(form).entries());
+    try {
+      switch (form.dataset.finForm) {
+        case "journal":
+          await api("/api/finance/journal", { method: "POST", body: JSON.stringify({
+            date: values.date, description: values.description, source: "Manual",
+            lines: [
+              { account_code: values.debit_account, debit: Number(values.debit), credit: 0 },
+              { account_code: values.credit_account, debit: 0, credit: Number(values.credit) }
+            ]
+          }) });
+          break;
+        case "expense":
+          await api("/api/finance/expenses", { method: "POST", body: JSON.stringify(values) });
+          break;
+        case "asset":
+          await api("/api/finance/fixed-assets", { method: "POST", body: JSON.stringify({
+            ...values, cost: Number(values.cost), life_years: Number(values.life_years), salvage: Number(values.salvage || 0)
+          }) });
+          break;
+        case "depreciate":
+          await api("/api/finance/fixed-assets/depreciate", { method: "POST", body: JSON.stringify(values) });
+          break;
+        case "budget":
+          await api(`/api/finance/budgets/${encodeURIComponent(values.period)}/${encodeURIComponent(values.code)}`, {
+            method: "PUT", body: JSON.stringify({ amount: Number(values.amount) })
+          });
+          break;
+        case "period-lock":
+          await api("/api/finance/period-lock", { method: "POST", body: JSON.stringify(values) });
+          break;
+        case "cash-period":
+        case "vat-period": {
+          const bounds = finPeriodBounds(values.period);
+          const endpoint = form.dataset.finForm === "vat-period" ? "vat-return" : "cash-flow";
+          const report = await api(`/api/finance/${endpoint}?${new URLSearchParams(bounds)}`);
+          form.parentElement.querySelector(".fin-period-result")?.remove();
+          if (endpoint === "vat-return") {
+            form.insertAdjacentHTML("afterend", `<div class="grid fin-period-result">
+              <div class="kpi"><div class="label">Output VAT</div><div class="value">${finAmount(report.output_vat)}</div></div>
+              <div class="kpi"><div class="label">Input VAT</div><div class="value">${finAmount(report.input_vat)}</div></div>
+              <div class="kpi"><div class="label">Net VAT</div><div class="value ${Number(report.net_vat) >= 0 ? "yellow" : "green"}">${finAmount(report.net_vat)}</div></div>
+            </div>`);
+          } else {
+            form.insertAdjacentHTML("afterend", `<div class="grid fin-period-result">
+              <div class="kpi"><div class="label">Cash Inflow</div><div class="value green">${finAmount(report.cash_inflow)}</div></div>
+              <div class="kpi"><div class="label">Cash Outflow</div><div class="value">${finAmount(report.cash_outflow)}</div></div>
+              <div class="kpi"><div class="label">Net Cash Movement</div><div class="value">${finAmount(Number(report.cash_inflow) - Number(report.cash_outflow))}</div></div>
+            </div>`);
+          }
+          return;
+        }
+      }
+      toast("Finance changes saved.", "ok");
+      await renderFinanceView(document.querySelector("#financeTabs button.active")?.dataset.finView || "overview");
+    } catch (err) {
+      toast(err.message, "err");
+    }
+  });
 }
 
 /* ============================================================
