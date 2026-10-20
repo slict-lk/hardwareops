@@ -88,9 +88,9 @@ function handleDatabaseBusy(error, req, res, source) {
 }
 
 app.use("/api", (req, res, next) => {
-  Promise.all([ensureAuthSchema(), initializeFinanceSchema()]).then(() => next()).catch(error => {
+  ensureAuthSchema().then(() => next()).catch(error => {
     if (handleDatabaseBusy(error, req, res, "initializeAuthSchema")) return;
-    console.error("Failed to initialize HardwareOps API:", error);
+    console.error("Failed to initialize HardwareOps authentication schema:", error);
     res.status(500).json({ error: "The API could not connect to its database." });
   });
 });
@@ -187,6 +187,14 @@ app.post("/api/logout", wrap(async (req, res) => {
 }));
 
 app.use("/api", requireAuth);
+
+app.use("/api/finance", (_req, res, next) => {
+  initializeFinanceSchema().then(() => next()).catch(error => {
+    if (handleDatabaseBusy(error, _req, res, "initializeFinanceSchema")) return;
+    console.error("Failed to initialize HardwareOps finance schema:", error);
+    res.status(503).json({ error: "Finance is temporarily unavailable while its database schema is initialized." });
+  });
+});
 
 function requireFinancePermission(permKey, fallbackMessage) {
   return async (req, res, next) => {
@@ -2000,7 +2008,10 @@ export function initializeFinanceSchema() {
       } finally {
         seedClient.release();
       }
-    })();
+    })().catch(error => {
+      delete globalThis[financeSchemaKey];
+      throw error;
+    });
   }
   return globalThis[financeSchemaKey];
 }
@@ -2010,7 +2021,6 @@ let stopPromise;
 
 export async function startServer(port = process.env.PORT || 4000, host) {
   await ensureAuthSchema();
-  await initializeFinanceSchema();
   await new Promise((resolveListen, rejectListen) => {
     const onError = error => {
       httpServer = undefined;
