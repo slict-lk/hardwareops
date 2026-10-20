@@ -11,6 +11,7 @@ analytics workflows with role-based access.
   summaries
 - Point of sale, inventory management, purchase orders, and goods received notes
 - Customer credit, invoices, services, rentals, and shrinkage tracking
+- Print and CSV export for sales, operations, analytics, and finance tables
 - Sales analytics and GMROI reporting
 - Master data for suppliers, items, categories, brands, locations, tax codes,
   units of measure, payment terms, and price tiers

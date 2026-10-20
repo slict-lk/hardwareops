@@ -153,6 +153,7 @@
   .badge.purple { background: rgba(155,89,182,0.2); color: var(--purple); }
 
   .toolbar { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+  .table-actions { display: flex; justify-content: flex-end; gap: 8px; margin: 0 0 8px; }
   .toolbar input, .toolbar select {
     background: var(--gray); border: 1px solid var(--border);
     color: var(--light); padding: 8px 12px; border-radius: 6px;
@@ -492,6 +493,8 @@
         <div id="posMsg" style="margin-top:10px;font-size:12px;"></div>
       </div>
     </div>
+    <h3 style="margin:24px 0 10px;font-size:16px;">Sales Transactions</h3>
+    <div id="salesTable"></div>
   </section>
 
   <section class="panel" id="inventory">
@@ -1011,6 +1014,93 @@ function table(rows) {
   return `<table><thead><tr>${head.map(h=>`<th>${h}</th>`).join("")}</tr></thead>
     <tbody>${body.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
 }
+
+function addTableActions(container, title) {
+  container.querySelectorAll("table").forEach((table, index) => {
+    if (table.previousElementSibling?.classList.contains("table-actions")) return;
+    const tableTitle = `${title}${index ? `-${index + 1}` : ""}`;
+    const controls = document.createElement("div");
+    controls.className = "table-actions";
+    controls.innerHTML = tableActionsMarkup(tableTitle);
+    table.before(controls);
+  });
+}
+
+function tableActionsMarkup(title) {
+  return `
+    <button class="btn secondary small" type="button" data-table-action="print" data-table-title="${finEsc(title)}">Print</button>
+    <button class="btn secondary small" type="button" data-table-action="csv" data-table-title="${finEsc(title)}">Export CSV</button>
+  `;
+}
+
+function exportTableRows(table) {
+  const rows = [...table.rows];
+  const actionColumns = [...(rows[0]?.cells || [])]
+    .map((cell, index) => cell.textContent.trim().toLowerCase() === "action" ? index : -1)
+    .filter(index => index >= 0);
+  return rows.map(row => [...row.cells]
+    .filter((_, index) => !actionColumns.includes(index))
+    .map(cell => {
+      const copy = cell.cloneNode(true);
+      copy.querySelectorAll("button, input, select, textarea").forEach(control => control.remove());
+      return copy.textContent.replace(/\s+/g, " ").trim();
+    }));
+}
+
+function csvValue(value) {
+  const safeValue = /^[\s]*[=+\-@]/.test(value) ? `'${value}` : value;
+  return `"${safeValue.replace(/"/g, '""')}"`;
+}
+
+document.addEventListener("click", event => {
+  const button = event.target instanceof Element
+    ? event.target.closest("[data-table-action]")
+    : null;
+  if (!button) return;
+  const table = button.parentElement?.nextElementSibling;
+  if (!(table instanceof HTMLTableElement)) return;
+  const title = button.dataset.tableTitle || "transactions";
+  const rows = exportTableRows(table);
+
+  if (button.dataset.tableAction === "csv") {
+    const csv = `\uFEFF${rows.map(row => row.map(csvValue).join(",")).join("\r\n")}`;
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${title.replace(/[^\w-]+/g, "-").replace(/^-|-$/g, "")}.csv`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return;
+  }
+
+  if (button.dataset.tableAction === "print") {
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      toast("Allow pop-ups to print this table.", "err");
+      return;
+    }
+    const printableTable = table.cloneNode(true);
+    const actionColumns = [...(printableTable.rows[0]?.cells || [])]
+      .map((cell, index) => cell.textContent.trim().toLowerCase() === "action" ? index : -1)
+      .filter(index => index >= 0)
+      .sort((a, b) => b - a);
+    printableTable.querySelectorAll("tr").forEach(row =>
+      actionColumns.forEach(index => row.cells[index]?.remove())
+    );
+    printableTable.querySelectorAll("button, input, select, textarea").forEach(control => control.remove());
+
+    printWindow.document.open();
+    printWindow.document.write("<!doctype html><html><head><meta charset='utf-8'><title>Print transactions</title><style>body{font:14px Arial,sans-serif;color:#111;margin:24px}h1{font-size:20px;margin:0 0 16px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #999;padding:7px;text-align:left}th{background:#eee}tr{break-inside:avoid}@media print{body{margin:12mm}}</style></head><body></body></html>");
+    printWindow.document.close();
+    const heading = printWindow.document.createElement("h1");
+    heading.textContent = title.replace(/[-_]+/g, " ");
+    printWindow.document.body.append(heading, printableTable);
+    printWindow.focus();
+    setTimeout(() => printWindow.print(), 100);
+  }
+});
 
 const MASTER_EDITORS = {
   suppliers: {
@@ -1559,7 +1649,7 @@ const finEsc = value => String(value ?? "").replace(/[&<>"']/g, char => ({
 
 function finTable(headers, rows) {
   if (!rows.length) return "<p style='color:#888;font-size:13px;'>No records found.</p>";
-  return table([headers, ...rows]);
+  return `<div class="table-actions">${tableActionsMarkup(`${headers[0]}-finance`)}</div>${table([headers, ...rows])}`;
 }
 
 function finAmount(value) {
@@ -1906,6 +1996,19 @@ function renderPOS() {
 
   renderPOSGrid();
   renderCart();
+  renderSalesTransactions();
+}
+
+function renderSalesTransactions() {
+  $("salesTable").innerHTML = posSales.length ? table([
+    ["Sale #","Date","Time","Customer","Cashier","Payment","Subtotal","Discount","Tax","Total","Return"],
+    ...posSales.map(s => [
+      `<code>${finEsc(s.id)}</code>`, finEsc(s.date), finEsc(s.time || "—"),
+      finEsc(s.customer || "Walk-in"), finEsc(s.cashier || "—"), finEsc(s.payment),
+      money(s.subtotal), money(s.discount), money(s.tax), money(s.total), s.is_return ? "Yes" : "No"
+    ])
+  ]) : "<p style='color:#888;font-size:13px;'>No sales transactions.</p>";
+  addTableActions($("salesTable"), "sales-transactions");
 }
 
 function renderPOSGrid() {
@@ -2030,7 +2133,7 @@ $("posCheckout").addEventListener("click", async () => {
 
     cart = [];
     $("posMsg").innerHTML = `<span style="color:var(--green);">✅ ${id} posted · ${money(posSales[0]?.total || 0)}</span>`;
-    renderCart(); renderPOSGrid(); renderDashboard(); renderInventory(); renderB2B(); renderGMROI();
+    renderCart(); renderPOSGrid(); renderSalesTransactions(); renderDashboard(); renderInventory(); renderB2B(); renderGMROI();
     toast(`Sale ${id} posted`, "ok");
     if (document.querySelector("#analytics.active")) renderAnalytics();
   } catch (err) {
@@ -2167,6 +2270,7 @@ function renderPO() {
       return [`<code>${p.id}</code>`, p.supplier, p.date, p.expected || "—", p.lines.length, money(total), `<span class="badge ${badge}">${p.status}</span>`, action];
     })
   ]) : "<p style='color:#888;font-size:13px;'>No POs.</p>";
+  addTableActions($("poTable"), "purchase-orders");
 
   document.querySelectorAll("[data-receive]").forEach(el => {
     el.onclick = () => {
@@ -2252,6 +2356,7 @@ function renderGRN() {
       return [`<code>${g.id}</code>`, `<code>${g.poId}</code>`, g.supplier, g.dateReceived, g.lines.length, money(val), g.receivedBy || "—", g.notes || "—"];
     })
   ]) : "<p style='color:#888;font-size:13px;'>No GRNs.</p>";
+  addTableActions($("grnTable"), "goods-received-notes");
 }
 
 /* ============================================================
@@ -2268,6 +2373,7 @@ function renderServices() {
       return [`<code>${s.id}</code>`, s.type, s.customer, s.dateIn, `<span class="badge ${statusBadge}">${s.status}</span>`, money(s.price), s.notes || "—"];
     })
   ]) : "<p style='color:#888;font-size:13px;'>No tickets.</p>";
+  addTableActions($("svcTable"), "service-tickets");
 }
 $("svcAdd").addEventListener("click", async () => {
   if (!can("services")) { toast("Permission denied", "err"); return; }
@@ -2308,6 +2414,7 @@ function renderRentals() {
       return [`<code>${r.id}</code>`, r.tool, r.customer, r.out, r.due, r.returned || "—", money(r.rate), lateFee ? `<span class="badge bad">${money(lateFee)}</span>` : "—", badge];
     })
   ]) : "";
+  addTableActions($("rentalTable"), "rentals");
 }
 
 /* ============================================================
@@ -2337,6 +2444,7 @@ function renderB2B() {
       return [`<code>${i.id}</code>`, i.customer, i.date, i.due, money(i.total), badge];
     })
   ]) : "";
+  addTableActions($("invoiceTable"), "invoices");
 }
 
 /* ============================================================
@@ -2362,6 +2470,7 @@ function renderShrink() {
         `<span class="badge ${s.reason==='Theft'?'bad':'warn'}">${s.reason}</span>`, s.dept, money(s.value)];
     })
   ]) : "";
+  addTableActions($("shrinkTable"), "shrinkage");
 }
 $("shrinkAdd").addEventListener("click", async () => {
   if (!can("shrink")) { toast("Permission denied", "err"); return; }
@@ -2505,6 +2614,7 @@ async function renderAnalytics() {
       ...rows.map(r => [r.supplier, r.po_count, money(r.total_value), money(r.received_value), money(r.open_value)])
     ]) : "<p style='color:#888;font-size:13px;'>No purchase orders.</p>";
   }
+  addTableActions($("anContent"), `analytics-${period}-${refDate}-${view}`);
 }
 
 $("anPeriod").addEventListener("change", renderAnalytics);

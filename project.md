@@ -93,6 +93,7 @@ describe those supporting files as part of the three-file core.
 - ✅ Creates a B2B invoice when the sale is on account and a customer is supplied.
 - ✅ Decrements stock through the `sale_lines` insert trigger.
 - ✅ Persists sale-time unit cost in `sale_lines.cost_at_sale`.
+- ✅ Lists sales transactions with print and CSV export actions.
 - 🚧 A complete return/refund workflow is not implemented by the sale creation
   function; `sales.is_return` exists and analytics excludes returned sales in
   some queries, but do not infer a complete return workflow from that column.
@@ -114,6 +115,7 @@ describe those supporting files as part of the three-file core.
 - ✅ Creates a GRN from the PO's lines and updates the PO to `Received`.
 - ✅ A GRN line insert updates stock; a statement-level finance trigger posts
   one journal entry for each affected GRN.
+- ✅ Purchase orders and GRNs can be printed or exported as CSV.
 - 🚧 The current GRN route receives every line on its PO; partial receiving,
   line-level discrepancy capture, and PO approval are not implemented.
 
@@ -137,6 +139,7 @@ describe those supporting files as part of the three-file core.
 - ✅ Stores customer type, price tier, credit limit, credit used, and terms.
 - ✅ Creates invoices for POS sales paid using `On Account (B2B)`.
 - ✅ Lists invoices and supports payment from the Finance AR workflow.
+- ✅ Invoices can be printed or exported as CSV.
 - ✅ Includes customer-credit analytics and an AR aging report.
 - 🚧 The sale function increases `credit_used` but does not itself reject a sale
   that would exceed `credit_limit`.
@@ -153,6 +156,8 @@ describe those supporting files as part of the three-file core.
 - ✅ Provides daily, weekly, and monthly analytics ranges.
 - ✅ Reports sales totals, cost, gross profit, cash/credit split, and item
   quantities.
+- ✅ Tables support printing and CSV export for the currently selected report
+  and period.
 - ✅ Reports item sales, customer credit, supplier purchases, and category
   GMROI.
 - ✅ The seeded category GMROI view computes gross margin divided by current
@@ -190,6 +195,7 @@ describe those supporting files as part of the three-file core.
   and depreciation activity through SQL functions/triggers or API transactions.
 - ✅ Reports account balances, trial balance, P&L, balance sheet, cash movement,
   aging, VAT totals, budgets, reconciliation status, and period locks.
+- ✅ Finance tables support printing and CSV export.
 - 🚧 Cash Flow currently totals direct debits/credits on accounts `1100` and
   `1110`; it is not an indirect-method cash-flow statement.
 - 🚧 Finance bootstrap creates an opening journal only if the journal table is
