@@ -1512,7 +1512,11 @@ function masterMutation(fn) {
 }
 
 for (const [resource, definition] of Object.entries(masterCrud)) {
-  app.put(`/api/${resource}/:id`, requireMasterEdit, masterMutation(async (req, res) => {
+  const updateRecord = masterMutation(async (req, res) => {
+    const id = req.params.id ?? req.query[definition.key];
+    if (typeof id !== "string" || !id) {
+      return res.status(400).json({ error: `${definition.key} is required.` });
+    }
     const updates = Object.entries(definition.fields)
       .filter(([field]) => Object.hasOwn(req.body || {}, field));
     if (!updates.length) {
@@ -1537,23 +1541,31 @@ for (const [resource, definition] of Object.entries(masterCrud)) {
         ? Number(raw) : raw;
     });
     const assignments = updates.map(([, spec], index) => `${spec.column} = $${index + 1}`);
-    values.push(req.params.id);
+    values.push(id);
     const { rowCount } = await q(
       `UPDATE ${definition.table} SET ${assignments.join(", ")} WHERE ${definition.key} = $${values.length}`,
       values
     );
     if (!rowCount) return res.status(404).json({ error: "Master record not found." });
     res.json({ ok: true });
-  }));
+  });
+  app.put(`/api/${resource}/:id`, requireMasterEdit, updateRecord);
+  if (resource === "items") app.put(`/api/${resource}`, requireMasterEdit, updateRecord);
 
-  app.delete(`/api/${resource}/:id`, requireMasterEdit, masterMutation(async (req, res) => {
+  const deleteRecord = masterMutation(async (req, res) => {
+    const id = req.params.id ?? req.query[definition.key];
+    if (typeof id !== "string" || !id) {
+      return res.status(400).json({ error: `${definition.key} is required.` });
+    }
     const { rowCount } = await q(
       `DELETE FROM ${definition.table} WHERE ${definition.key} = $1`,
-      [req.params.id]
+      [id]
     );
     if (!rowCount) return res.status(404).json({ error: "Master record not found." });
     res.json({ ok: true });
-  }));
+  });
+  app.delete(`/api/${resource}/:id`, requireMasterEdit, deleteRecord);
+  if (resource === "items") app.delete(`/api/${resource}`, requireMasterEdit, deleteRecord);
 }
 
 app.get("/api/customers", wrap(async (_req,res)=> res.json((await q(`

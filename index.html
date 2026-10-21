@@ -1160,7 +1160,7 @@ const MASTER_EDITORS = {
     fields:[{key:"name",label:"Category Name"},{key:"margin",label:"Target Margin %",type:"number",step:"any"}]
   },
   items: {
-    endpoint:"items", key:"sku", records:() => inventory,
+    endpoint:"items", key:"sku", keyInQuery:true, records:() => inventory,
     fields:[
       {key:"name",label:"Item Name"}, {key:"cat",label:"Category",type:"select",nullable:true,
         options:() => categoryMaster.map(c => [c.code, `${c.code} — ${c.name}`])},
@@ -1246,6 +1246,13 @@ const MASTER_EDITORS = {
     ]
   }
 };
+
+function masterRecordUrl(definition, id) {
+  const encodedId = encodeURIComponent(id);
+  return definition.keyInQuery
+    ? `/api/${definition.endpoint}?${encodeURIComponent(definition.key)}=${encodedId}`
+    : `/api/${definition.endpoint}/${encodedId}`;
+}
 
 function masterActionCell(type, record) {
   const definition = MASTER_EDITORS[type];
@@ -1342,7 +1349,7 @@ async function editMasterRecord(type, encodedId) {
       for (const field of definition.fields) {
         if (field.number && payload[field.key] !== "") payload[field.key] = Number(payload[field.key]);
       }
-      await api(`/api/${definition.endpoint}/${encodeURIComponent(id)}`, {
+      await api(masterRecordUrl(definition, id), {
         method:"PUT", body:JSON.stringify(payload)
       });
       dialog.close();
@@ -1395,7 +1402,7 @@ document.addEventListener("click", async event => {
   const record = definition.records().find(row => String(row[definition.key]) === id);
   if (!record || !confirm(`Delete this ${type.replaceAll("-", " ")} record? This cannot be undone.`)) return;
   try {
-    await api(`/api/${definition.endpoint}/${encodeURIComponent(id)}`, { method:"DELETE" });
+    await api(masterRecordUrl(definition, id), { method:"DELETE" });
     await refreshMasterData(type);
     renderMastersDropdowns();
     renderAll();
