@@ -4,7 +4,13 @@
     "api/[...path].js": {
       "maxConcurrency": 20
     },
+    "api/[endpoint]/[...path].js": {
+      "maxConcurrency": 20
+    },
     "api/finance/[...path].js": {
+      "maxConcurrency": 20
+    },
+    "api/finance/[endpoint]/[...path].js": {
       "maxConcurrency": 20
     },
     "api/finance/ledger/[account].js": {
