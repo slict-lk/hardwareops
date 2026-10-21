@@ -11,12 +11,38 @@
     --gray: #2a2a2a;
     --light: #f5f5f5;
     --border: #3a3a3a;
+    --surface: #1a1a1a;
+    --surface-raised: #1f1f1f;
+    --surface-hover: #202020;
+    --muted: #888;
+    --muted-strong: #999;
+    --muted-soft: #666;
+    --muted-label: #aaa;
+    --input-border: #444;
+    --login-accent: #29231e;
+    color-scheme: dark;
     --green: #27ae60;
     --red: #c0392b;
     --yellow: #f39c12;
     --blue: #3498db;
     --gold: #D4A017;
     --purple: #9b59b6;
+  }
+  :root[data-theme="light"] {
+    --dark: #f4f6f8;
+    --gray: #fff;
+    --light: #202a36;
+    --border: #d5dce5;
+    --surface: #f8fafc;
+    --surface-raised: #f1f4f7;
+    --surface-hover: #e9eef4;
+    --muted: #667085;
+    --muted-strong: #596579;
+    --muted-soft: #6b7280;
+    --muted-label: #596579;
+    --input-border: #c5ced8;
+    --login-accent: #fff4e9;
+    color-scheme: light;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -32,11 +58,11 @@
   header h1 { font-size: 20px; letter-spacing: 0.5px; }
   header h1 span { color: var(--orange); }
   .header-right { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-  .flag { font-size: 12px; color: #888; }
+  .flag { font-size: 12px; color: var(--muted); }
 
   .user-chip {
     display: flex; align-items: center; gap: 10px;
-    background: #1a1a1a; border: 1px solid var(--border);
+    background: var(--surface); border: 1px solid var(--border);
     border-radius: 8px; padding: 6px 12px; font-size: 12px;
     transition: border-color 0.15s;
   }
@@ -51,15 +77,15 @@
 
   .tax-toggle {
     display: flex; align-items: center; gap: 10px;
-    background: #1a1a1a; border: 1px solid var(--border);
+    background: var(--surface); border: 1px solid var(--border);
     border-radius: 8px; padding: 6px 12px; font-size: 12px;
   }
   .tax-toggle .label {
     text-transform: uppercase; letter-spacing: 1px;
-    color: #888; font-size: 10px;
+    color: var(--muted); font-size: 10px;
   }
   .tax-toggle .value { color: var(--gold); font-weight: 700; font-size: 13px; }
-  .tax-toggle .value.off { color: #666; }
+  .tax-toggle .value.off { color: var(--muted-soft); }
 
   .switch {
     position: relative; display: inline-block;
@@ -69,7 +95,7 @@
   .slider {
     position: absolute; cursor: pointer;
     top: 0; left: 0; right: 0; bottom: 0;
-    background-color: #444; transition: 0.3s; border-radius: 24px;
+    background-color: var(--input-border); transition: 0.3s; border-radius: 24px;
   }
   .slider:before {
     position: absolute; content: "";
@@ -104,7 +130,7 @@
     font-size: 22px; margin-bottom: 6px;
     border-left: 4px solid var(--orange); padding-left: 12px;
   }
-  .panel .sub { color: #888; margin-bottom: 24px; font-size: 13px; }
+  .panel .sub { color: var(--muted); margin-bottom: 24px; font-size: 13px; }
   .grid {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 16px; margin-bottom: 24px;
@@ -114,7 +140,7 @@
     border-radius: 8px; padding: 18px;
   }
   .kpi .label {
-    font-size: 11px; text-transform: uppercase; color: #888;
+    font-size: 11px; text-transform: uppercase; color: var(--muted);
     letter-spacing: 1px; margin-bottom: 6px;
   }
   .kpi .value { font-size: 22px; font-weight: 700; color: var(--orange); }
@@ -124,7 +150,7 @@
   .kpi .value.blue { color: var(--blue); }
   .kpi .value.gold { color: var(--gold); }
   .kpi .value.purple { color: var(--purple); }
-  .kpi .meta { font-size: 12px; color: #666; margin-top: 4px; }
+  .kpi .meta { font-size: 12px; color: var(--muted-soft); margin-top: 4px; }
 
   table {
     width: 100%; border-collapse: collapse; background: var(--gray);
@@ -135,11 +161,11 @@
     border-bottom: 1px solid var(--border);
   }
   th {
-    background: #1f1f1f; font-size: 11px; text-transform: uppercase;
-    letter-spacing: 0.5px; color: #999;
+    background: var(--surface-raised); font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.5px; color: var(--muted-strong);
   }
   tr:last-child td { border-bottom: none; }
-  tr:hover td { background: #202020; }
+  tr:hover td { background: var(--surface-hover); }
   .badge {
     display: inline-block; padding: 3px 8px; border-radius: 4px;
     font-size: 11px; font-weight: 600;
@@ -181,11 +207,11 @@
   }
   .form-row label {
     display: flex; flex-direction: column; gap: 4px;
-    font-size: 11px; text-transform: uppercase; color: #888;
+    font-size: 11px; text-transform: uppercase; color: var(--muted);
     letter-spacing: 0.5px;
   }
   .form-row input, .form-row select {
-    background: #1a1a1a; border: 1px solid var(--border);
+    background: var(--surface); border: 1px solid var(--border);
     color: var(--light); padding: 8px; border-radius: 4px;
     font-size: 13px; font-family: inherit;
   }
@@ -222,7 +248,7 @@
     border-radius: 8px; padding: 16px;
   }
   .pos-products input {
-    width: 100%; padding: 12px; background: #1a1a1a;
+    width: 100%; padding: 12px; background: var(--surface);
     border: 1px solid var(--border); color: var(--light);
     border-radius: 6px; font-size: 14px; margin-bottom: 12px;
   }
@@ -232,12 +258,12 @@
     gap: 8px; max-height: 520px; overflow-y: auto;
   }
   .pos-item {
-    background: #1a1a1a; border: 1px solid var(--border);
+    background: var(--surface); border: 1px solid var(--border);
     border-radius: 6px; padding: 10px; cursor: pointer;
     transition: all 0.15s;
   }
-  .pos-item:hover { border-color: var(--orange); background: #202020; }
-  .pos-item .sku { font-size: 10px; color: #666; font-family: monospace; }
+  .pos-item:hover { border-color: var(--orange); background: var(--surface-hover); }
+  .pos-item .sku { font-size: 10px; color: var(--muted-soft); font-family: monospace; }
   .pos-item .name {
     font-size: 12px; margin: 4px 0; line-height: 1.3;
     height: 32px; overflow: hidden;
@@ -251,7 +277,7 @@
   }
   .pos-cart h3 {
     font-size: 14px; text-transform: uppercase; letter-spacing: 1px;
-    color: #888; margin-bottom: 12px;
+    color: var(--muted); margin-bottom: 12px;
   }
   .cart-items { max-height: 320px; overflow-y: auto; margin-bottom: 12px; }
   .cart-line {
@@ -261,7 +287,7 @@
   }
   .cart-line .qty { display: flex; align-items: center; gap: 4px; }
   .cart-line .qty button {
-    background: #1a1a1a; border: 1px solid var(--border);
+    background: var(--surface); border: 1px solid var(--border);
     color: var(--light); width: 22px; height: 22px;
     border-radius: 4px; cursor: pointer; font-size: 12px;
   }
@@ -280,19 +306,19 @@
     margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
   }
   .cart-totals .row.tax-off { opacity: 0.5; }
-  .cart-totals .row.tax-off span:last-child { color: #666; }
-  .cart-empty { color: #666; text-align: center; padding: 30px; font-size: 13px; }
+  .cart-totals .row.tax-off span:last-child { color: var(--muted-soft); }
+  .cart-empty { color: var(--muted-soft); text-align: center; padding: 30px; font-size: 13px; }
 
   .master-tabs {
     display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap;
     border-bottom: 1px solid var(--border); padding-bottom: 12px;
   }
   .master-tabs button {
-    background: transparent; color: #888; border: none;
+    background: transparent; color: var(--muted); border: none;
     padding: 8px 14px; border-radius: 6px; cursor: pointer;
     font-size: 13px; transition: all 0.15s;
   }
-  .master-tabs button:hover { color: var(--light); background: #1f1f1f; }
+  .master-tabs button:hover { color: var(--light); background: var(--surface-raised); }
   .master-tabs button.active {
     background: var(--orange); color: white; font-weight: 600;
   }
@@ -316,7 +342,7 @@
     padding: 12px; border: 1px solid var(--border); border-radius: 8px;
     margin-bottom: 8px; cursor: pointer; transition: all 0.15s;
   }
-  .user-option:hover { border-color: var(--orange); background: #1f1f1f; }
+  .user-option:hover { border-color: var(--orange); background: var(--surface-raised); }
   .user-option.current { border-color: var(--purple); background: rgba(155,89,182,0.1); }
   .user-option .avatar {
     width: 40px; height: 40px; border-radius: 50%;
@@ -349,7 +375,7 @@
   .toast.ok { border-color: var(--green); }
   .login-screen {
     min-height: 100vh; display: grid; place-items: center; padding: 24px;
-    background: radial-gradient(ellipse at top, #29231e 0, var(--dark) 60%);
+    background: radial-gradient(ellipse at top, var(--login-accent) 0, var(--dark) 60%);
   }
   [hidden] { display: none !important; }
   .login-card {
@@ -359,13 +385,13 @@
   }
   .login-card h1 { font-size: 25px; margin-bottom: 8px; }
   .login-card h1 span { color: var(--orange); }
-  .login-card p { color: #999; font-size: 13px; margin-bottom: 24px; }
+  .login-card p { color: var(--muted-strong); font-size: 13px; margin-bottom: 24px; }
   .login-card label {
     display: flex; flex-direction: column; gap: 7px; margin-bottom: 16px;
-    color: #aaa; font-size: 11px; text-transform: uppercase; letter-spacing: 0.7px;
+    color: var(--muted-label); font-size: 11px; text-transform: uppercase; letter-spacing: 0.7px;
   }
   .login-card input {
-    width: 100%; padding: 12px; color: var(--light); background: #1a1a1a;
+    width: 100%; padding: 12px; color: var(--light); background: var(--surface);
     border: 1px solid var(--border); border-radius: 6px; font: inherit;
     font-size: 14px; text-transform: none; letter-spacing: normal;
   }
@@ -374,6 +400,9 @@
   .login-error { min-height: 18px; margin: 0 0 12px !important; color: #e87569 !important; }
   .login-note { margin: 20px 0 0 !important; font-size: 11px !important; line-height: 1.5; }
 </style>
+<script>
+  document.documentElement.dataset.theme = localStorage.getItem("hardwareopsTheme") === "light" ? "light" : "dark";
+</script>
 </head>
 <body>
 
@@ -398,6 +427,7 @@
   <h1>Hardware<span>Ops</span> Optimizer</h1>
   <div class="header-right">
     <div class="flag">🇱🇰 SL · LKR</div>
+    <button class="btn secondary small" id="themeToggle" type="button" aria-label="Switch to light mode">☀ Light mode</button>
     <div class="tax-toggle">
       <span class="label">VAT</span>
       <label class="switch">
@@ -865,6 +895,19 @@
 <script>
 const $ = id => document.getElementById(id);
 
+const themeToggle = $("themeToggle");
+const setTheme = theme => {
+  document.documentElement.dataset.theme = theme;
+  const nextTheme = theme === "dark" ? "light" : "dark";
+  themeToggle.textContent = nextTheme === "light" ? "☀ Light mode" : "☾ Dark mode";
+  themeToggle.setAttribute("aria-label", `Switch to ${nextTheme} mode`);
+  localStorage.setItem("hardwareopsTheme", theme);
+};
+setTheme(document.documentElement.dataset.theme || "dark");
+themeToggle.addEventListener("click", () => {
+  setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+});
+
 /* ============================================================
    API CLIENT
    ============================================================ */
@@ -1217,7 +1260,7 @@ function getMasterEditorDialog() {
 
   dialog = document.createElement("dialog");
   dialog.id = "masterEditor";
-  dialog.style.cssText = "width:min(560px,92vw);max-height:85vh;overflow:auto;padding:24px;border:1px solid #444;border-radius:10px;background:#171717;color:#eee";
+  dialog.style.cssText = "width:min(560px,92vw);max-height:85vh;overflow:auto;padding:24px;border:1px solid var(--border);border-radius:10px;background:var(--gray);color:var(--light)";
   document.body.appendChild(dialog);
   return dialog;
 }
@@ -1244,7 +1287,7 @@ async function editMasterRecord(type, encodedId) {
   for (const field of definition.fields) {
     const label = document.createElement("label");
     label.textContent = field.label;
-    label.style.cssText = "display:grid;gap:6px;color:#ccc";
+    label.style.cssText = "display:grid;gap:6px;color:var(--muted-label)";
     let input;
     if (field.type === "select") {
       input = document.createElement("select");
@@ -1268,7 +1311,7 @@ async function editMasterRecord(type, encodedId) {
     input.name = field.key;
     input.value = field.key === "cheque" ? (record.cheque ? "yes" : "no") : record[field.key] ?? "";
     input.required = !field.nullable;
-    input.style.cssText = "padding:9px;border:1px solid #444;border-radius:5px;background:#222;color:#eee";
+    input.style.cssText = "padding:9px;border:1px solid var(--input-border);border-radius:5px;background:var(--surface);color:var(--light)";
     label.appendChild(input);
     form.appendChild(label);
   }
@@ -1537,7 +1580,7 @@ function renderRoleAlert() {
   const r = ROLES[u.role] || { color:"#999", desc:"" };
   $("alertRole").innerHTML = `
     <strong style="color:${r.color}">👤 ${u.name} — ${u.role}</strong><br>
-    <span style="color:#aaa;font-size:12px;">${r.desc}</span>
+    <span style="color:var(--muted-label);font-size:12px;">${r.desc}</span>
   `;
   $("alertRole").className = "alert purple";
 }
@@ -1636,7 +1679,7 @@ function renderDashboard() {
       i.supplier || "—",
       (supplierMaster.find(s=>s.name===i.supplier)?.lead || "—") + " days"
     ])
-  ]) : "<p style='color:#888;font-size:13px;'>No items below reorder point.</p>";
+  ]) : "<p style='color:var(--muted);font-size:13px;'>No items below reorder point.</p>";
 }
 
 async function renderFinance() {
@@ -1648,7 +1691,7 @@ const finEsc = value => String(value ?? "").replace(/[&<>"']/g, char => ({
 })[char]);
 
 function finTable(headers, rows) {
-  if (!rows.length) return "<p style='color:#888;font-size:13px;'>No records found.</p>";
+  if (!rows.length) return "<p style='color:var(--muted);font-size:13px;'>No records found.</p>";
   return `<div class="table-actions">${tableActionsMarkup(`${headers[0]}-finance`)}</div>${table([headers, ...rows])}`;
 }
 
@@ -1671,13 +1714,13 @@ function finOptions(accounts, selected = "", postableOnly = false) {
 async function renderFinanceView(view) {
   const content = $("financeContent");
   if (!can("finance")) {
-    content.innerHTML = "<p style='color:#888;font-size:13px;'>Finance access is denied for this role.</p>";
+    content.innerHTML = "<p style='color:var(--muted);font-size:13px;'>Finance access is denied for this role.</p>";
     return;
   }
   document.querySelectorAll("#financeTabs button").forEach(button =>
     button.classList.toggle("active", button.dataset.finView === view)
   );
-  content.innerHTML = "<p style='color:#888;font-size:13px;'>Loading finance data…</p>";
+  content.innerHTML = "<p style='color:var(--muted);font-size:13px;'>Loading finance data…</p>";
   try {
     let data;
     let accounts;
@@ -1895,7 +1938,7 @@ async function renderFinanceView(view) {
         ))}`;
         return;
       default:
-        content.innerHTML = "<p style='color:#888;font-size:13px;'>Select a finance view.</p>";
+        content.innerHTML = "<p style='color:var(--muted);font-size:13px;'>Select a finance view.</p>";
     }
   } catch (err) {
     content.innerHTML = `<p style="color:var(--red);font-size:13px;">Unable to load finance data: ${finEsc(err.message)}</p>`;
@@ -2152,7 +2195,7 @@ function renderSalesTransactions() {
       finEsc(s.customer || "Walk-in"), finEsc(s.cashier || "—"), finEsc(s.payment),
       money(s.subtotal), money(s.discount), money(s.tax), money(s.total), s.is_return ? "Yes" : "No"
     ])
-  ]) : "<p style='color:#888;font-size:13px;'>No sales transactions.</p>";
+  ]) : "<p style='color:var(--muted);font-size:13px;'>No sales transactions.</p>";
   addTableActions($("salesTable"), "sales-transactions");
 }
 
@@ -2166,7 +2209,7 @@ function renderPOSGrid() {
       <div class="sku">${i.sku} · ${i.uom}</div>
       <div class="name">${i.name}</div>
       <div class="price">${money(i.price)}</div>
-      <div style="font-size:10px;color:#666;margin-top:4px;">${i.location} · ${i.qty}</div>
+      <div style="font-size:10px;color:var(--muted-soft);margin-top:4px;">${i.location} · ${i.qty}</div>
     </div>
   `).join("");
   document.querySelectorAll(".pos-item").forEach(el => el.addEventListener("click", () => addToCart(el.dataset.sku)));
@@ -2204,7 +2247,7 @@ function renderCart() {
       <div class="cart-line">
         <div>
           <div style="font-size:12px;">${l.name}</div>
-          <div style="font-size:10px;color:#666;font-family:monospace;">${l.sku} · ${l.uom} · ${l.tax}</div>
+          <div style="font-size:10px;color:var(--muted-soft);font-family:monospace;">${l.sku} · ${l.uom} · ${l.tax}</div>
         </div>
         <div class="qty">
           <button data-sku="${l.sku}" data-delta="-1">−</button>
@@ -2258,7 +2301,7 @@ $("posCheckout").addEventListener("click", async () => {
     }
   }
 
-  $("posMsg").innerHTML = `<span style="color:#888;">Posting…</span>`;
+  $("posMsg").innerHTML = `<span style="color:var(--muted);">Posting…</span>`;
 
   try {
     const { id } = await api("/api/sales", {
@@ -2326,7 +2369,7 @@ function renderInventory() {
         `<span class="badge ${mClass}">${m.toFixed(1)}%</span>`, badge
       ];
     })
-  ]) : "<p style='color:#888;font-size:13px;'>No matching items.</p>";
+  ]) : "<p style='color:var(--muted);font-size:13px;'>No matching items.</p>";
 }
 $("invSearch").addEventListener("input", renderInventory);
 $("invCat").addEventListener("change", renderInventory);
@@ -2410,11 +2453,11 @@ function renderPO() {
     ...purchaseOrders.map(p => {
       const total = p.lines.reduce((s, l) => s + Number(l.qty) * Number(l.cost), 0);
       const badge = {Draft:"warn",Sent:"blue",Partial:"info",Received:"ok",Cancelled:"bad"}[p.status] || "info";
-      const action = p.status === "Received" ? `<span style="color:#666;font-size:12px;">Closed</span>`
+      const action = p.status === "Received" ? `<span style="color:var(--muted-soft);font-size:12px;">Closed</span>`
         : `<button class="btn small" data-receive="${p.id}">Receive →</button>`;
       return [`<code>${p.id}</code>`, p.supplier, p.date, p.expected || "—", p.lines.length, money(total), `<span class="badge ${badge}">${p.status}</span>`, action];
     })
-  ]) : "<p style='color:#888;font-size:13px;'>No POs.</p>";
+  ]) : "<p style='color:var(--muted);font-size:13px;'>No POs.</p>";
   addTableActions($("poTable"), "purchase-orders");
 
   document.querySelectorAll("[data-receive]").forEach(el => {
@@ -2500,7 +2543,7 @@ function renderGRN() {
       const val = g.lines.reduce((s, l) => s + Number(l.qty) * Number(l.cost), 0);
       return [`<code>${g.id}</code>`, `<code>${g.poId}</code>`, g.supplier, g.dateReceived, g.lines.length, money(val), g.receivedBy || "—", g.notes || "—"];
     })
-  ]) : "<p style='color:#888;font-size:13px;'>No GRNs.</p>";
+  ]) : "<p style='color:var(--muted);font-size:13px;'>No GRNs.</p>";
   addTableActions($("grnTable"), "goods-received-notes");
 }
 
@@ -2517,7 +2560,7 @@ function renderServices() {
       const statusBadge = {Pending:"warn",In_Progress:"info",Ready:"ok",Picked_Up:"ok"}[s.status] || "info";
       return [`<code>${s.id}</code>`, s.type, s.customer, s.dateIn, `<span class="badge ${statusBadge}">${s.status}</span>`, money(s.price), s.notes || "—"];
     })
-  ]) : "<p style='color:#888;font-size:13px;'>No tickets.</p>";
+  ]) : "<p style='color:var(--muted);font-size:13px;'>No tickets.</p>";
   addTableActions($("svcTable"), "service-tickets");
 }
 $("svcAdd").addEventListener("click", async () => {
@@ -2650,7 +2693,7 @@ async function renderGMROI() {
     return [r.name, money(r.gross_margin), money(r.avg_inventory),
       `<span class="badge ${cls}">${gmroi.toFixed(2)}</span>`,
       `<span class="badge ${margin>=30?'ok':margin>=15?'warn':'bad'}">${margin.toFixed(1)}%</span>`,
-      `<span style="color:#666;font-size:11px;">retail ${money(r.retail_value)}</span>`];
+      `<span style="color:var(--muted-soft);font-size:11px;">retail ${money(r.retail_value)}</span>`];
   });
 
   const totalGM = rows.reduce((s, r) => s + Number(r.gross_margin), 0);
@@ -2662,7 +2705,7 @@ async function renderGMROI() {
     ...rendered,
     ["<strong>Overall</strong>", money(totalGM), money(totalInv),
      `<span class="badge ${overall>=2?'ok':overall>=1.5?'warn':'bad'}"><strong>${overall.toFixed(2)}</strong></span>`, "—", "—"]
-  ]) : "<p style='color:#888;font-size:13px;'>No inventory data.</p>";
+  ]) : "<p style='color:var(--muted);font-size:13px;'>No inventory data.</p>";
 }
 
 /* ============================================================
@@ -2729,10 +2772,10 @@ async function renderAnalytics() {
         return [`<code>${r.sku}</code>`, r.name, r.uom, r.qty, money(rev), money(r.cost),
           money(gpLine), `<span class="badge ${mCls}">${m.toFixed(1)}%</span>`];
       })
-    ]) : "<p style='color:#888;font-size:13px;'>No items sold in this period.</p>";
+    ]) : "<p style='color:var(--muted);font-size:13px;'>No items sold in this period.</p>";
   }
   else if (view === "returns") {
-    $("anContent").innerHTML = "<p style='color:#888;font-size:13px;'>No returns recorded in this period.</p>";
+    $("anContent").innerHTML = "<p style='color:var(--muted);font-size:13px;'>No returns recorded in this period.</p>";
   }
   else if (view === "cashcredit") {
     const rows = await api(`/api/analytics/cash-credit?period=${period}&date=${refDate}`);
@@ -2741,7 +2784,7 @@ async function renderAnalytics() {
       ...rows.map(s => [`<code>${s.id}</code>`, s.date, s.customer,
         `<span class="badge ${s.payment==="On Account (B2B)"?"yellow":"gold"}">${s.payment}</span>`,
         money(s.total), s.items || 0])
-    ]) : "<p style='color:#888;font-size:13px;'>No sales in this period.</p>";
+    ]) : "<p style='color:var(--muted);font-size:13px;'>No sales in this period.</p>";
   }
   else if (view === "customercredit") {
     const rows = await api("/api/analytics/customer-credit");
@@ -2750,14 +2793,14 @@ async function renderAnalytics() {
       ...rows.map(r => [r.name, r.type, money(r.credit_limit), money(r.credit_used),
         money(r.available), money(r.unpaid_total),
         `<span class="badge ${Number(r.unpaid_total)>0?'bad':'ok'}">${Number(r.unpaid_total)>0?'Outstanding':'Clear'}</span>`])
-    ]) : "<p style='color:#888;font-size:13px;'>No B2B customers.</p>";
+    ]) : "<p style='color:var(--muted);font-size:13px;'>No B2B customers.</p>";
   }
   else if (view === "supplierpurchases") {
     const rows = await api("/api/analytics/supplier-purchases");
     $("anContent").innerHTML = rows.length ? table([
       ["Supplier","PO Count","Total Purchases","Received","Open"],
       ...rows.map(r => [r.supplier, r.po_count, money(r.total_value), money(r.received_value), money(r.open_value)])
-    ]) : "<p style='color:#888;font-size:13px;'>No purchase orders.</p>";
+    ]) : "<p style='color:var(--muted);font-size:13px;'>No purchase orders.</p>";
   }
   addTableActions($("anContent"), `analytics-${period}-${refDate}-${view}`);
 }
@@ -2935,7 +2978,7 @@ function renderUOM() {
   $("uomTable").innerHTML = table([
     ["Code","Name","Base","Conv","Dec","Usage","Actions"],
     ...uomMaster.map(u => [`<span class="badge purple">${u.code}</span>`, u.name,
-      u.base || "<em style='color:#666;'>base</em>", u.factor, u.dec,
+      u.base || "<em style='color:var(--muted-soft);'>base</em>", u.factor, u.dec,
       `<span class="badge info">${inventory.filter(i=>i.uom===u.code).length}</span>`,
       masterActionCell("uoms", u)])
   ]);
@@ -3205,13 +3248,13 @@ async function openUserEditor(user = null) {
   const addField = (labelText, name, type, value, required = true) => {
     const label = document.createElement("label");
     label.textContent = labelText;
-    label.style.cssText = "display:grid;gap:6px;color:#ccc";
+    label.style.cssText = "display:grid;gap:6px;color:var(--muted-label)";
     const input = document.createElement("input");
     input.type = type;
     input.name = name;
     input.value = value || "";
     input.required = required;
-    input.style.cssText = "padding:9px;border:1px solid #444;border-radius:5px;background:#222;color:#eee";
+    input.style.cssText = "padding:9px;border:1px solid var(--input-border);border-radius:5px;background:var(--surface);color:var(--light)";
     label.appendChild(input);
     form.appendChild(label);
     return input;
@@ -3221,11 +3264,11 @@ async function openUserEditor(user = null) {
   addField("Email", "email", "email", user?.email);
   const roleLabel = document.createElement("label");
   roleLabel.textContent = "Role";
-  roleLabel.style.cssText = "display:grid;gap:6px;color:#ccc";
+  roleLabel.style.cssText = "display:grid;gap:6px;color:var(--muted-label)";
   const roleSelect = document.createElement("select");
   roleSelect.name = "role";
   roleSelect.required = true;
-  roleSelect.style.cssText = "padding:9px;border:1px solid #444;border-radius:5px;background:#222;color:#eee";
+  roleSelect.style.cssText = "padding:9px;border:1px solid var(--input-border);border-radius:5px;background:var(--surface);color:var(--light)";
   if (!user) {
     const placeholder = document.createElement("option");
     placeholder.value = "";
