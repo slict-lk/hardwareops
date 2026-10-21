@@ -730,6 +730,13 @@ BEGIN
     END IF;
 
     FOR v_line IN SELECT * FROM jsonb_array_elements(COALESCE(p_lines, '[]'::jsonb)) LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM chart_of_accounts
+            WHERE code = (v_line->>'account_code')::TEXT AND postable
+        ) THEN
+            RAISE EXCEPTION 'Journal line account % does not exist or is not postable.',
+                v_line->>'account_code';
+        END IF;
         IF COALESCE((v_line->>'debit')::NUMERIC, 0) < 0
            OR COALESCE((v_line->>'credit')::NUMERIC, 0) < 0
            OR (COALESCE((v_line->>'debit')::NUMERIC, 0) > 0

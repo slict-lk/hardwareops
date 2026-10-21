@@ -11,6 +11,12 @@ analytics workflows with role-based access.
   summaries
 - Point of sale, inventory management, purchase orders, and goods received notes
 - Customer credit, invoices, services, rentals, and shrinkage tracking
+- Finance CRUD for expenses, fixed assets, budgets, and bank reconciliation,
+  with correcting journal entries posted on the current accounting date for
+  posted changes; journal entries and period locks remain protected to preserve
+  the accounting audit trail
+- Chart of accounts management with protected built-in accounts and safeguards
+  against deleting accounts referenced by ledger activity or other finance data
 - Print and CSV export for sales, operations, analytics, and finance tables
 - Sales analytics and GMROI reporting
 - Master data for suppliers, items, categories, brands, locations, tax codes,

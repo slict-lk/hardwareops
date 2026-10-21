@@ -217,6 +217,12 @@ function requireFinancePermission(permKey, fallbackMessage) {
 
 const requireFinance = requireFinancePermission("finance", "Finance access is not permitted for this role.");
 const requireFinanceEdit = requireFinancePermission("finance_edit", "Finance editing is not permitted for this role.");
+const systemAccountCodes = new Set([
+  "1100", "1110", "1200", "1300", "1400", "1500", "1510", "1520", "1690",
+  "2100", "2200", "2210", "2300", "2400", "2500", "3000", "3100", "3200",
+  "4100", "4200", "4300", "4400", "4900", "5100", "6100", "6200", "6300",
+  "6400", "6500", "6600", "6700", "6800", "6900"
+]);
 
 async function requireMasterEdit(req, res, next) {
   try {
@@ -454,10 +460,157 @@ app.get("/api/permissions", wrap(async (_req, res) => {
 
 app.get("/api/finance/accounts", requireFinance, wrap(async (_req, res) => {
   const { rows } = await q(`
-    SELECT code, name, account_type AS type, parent_code, postable, contra
-    FROM chart_of_accounts
-    ORDER BY code`);
+    SELECT coa.code, coa.name, coa.account_type AS type, coa.parent_code,
+           coa.postable, coa.contra,
+           EXISTS (SELECT 1 FROM journal_lines jl WHERE jl.account_code = coa.code) AS has_activity
+    FROM chart_of_accounts coa
+    ORDER BY coa.code`);
   res.json(rows);
+}));
+
+const accountTypes = new Set(["Asset", "Liability", "Equity", "Revenue", "COGS", "Expense"]);
+
+function validateAccountValues(body) {
+  const code = String(body?.code ?? "").trim();
+  const name = String(body?.name ?? "").trim();
+  const type = String(body?.type ?? "").trim();
+  const parentCode = String(body?.parent_code ?? "").trim() || null;
+  if (!/^[A-Za-z0-9_-]{1,20}$/.test(code) || !name || name.length > 120
+      || !accountTypes.has(type)
+      || (parentCode && !/^[A-Za-z0-9_-]{1,20}$/.test(parentCode))
+      || typeof body?.postable !== "boolean" || typeof body?.contra !== "boolean") {
+    return { error: "Enter a valid account code, name, type, parent, and account settings." };
+  }
+  if (parentCode === code) return { error: "An account cannot be its own parent." };
+  return { code, name, type, parentCode, postable: body.postable, contra: body.contra };
+}
+
+app.post("/api/finance/accounts", requireFinanceEdit, wrap(async (req, res) => {
+  const account = validateAccountValues(req.body);
+  if (account.error) return res.status(400).json({ error: account.error });
+  const { rows } = await q(`
+    INSERT INTO chart_of_accounts (code, name, account_type, parent_code, postable, contra)
+    VALUES ($1, $2, $3, $4, $5, $6)
+    RETURNING code, name, account_type AS type, parent_code, postable, contra`,
+  [account.code, account.name, account.type, account.parentCode, account.postable, account.contra]);
+  res.status(201).json(rows[0]);
+}));
+
+app.put("/api/finance/accounts/:code", requireFinanceEdit, wrap(async (req, res) => {
+  const account = validateAccountValues({ ...req.body, code: req.params.code });
+  if (account.error) return res.status(400).json({ error: account.error });
+  const client = await connectDb();
+  try {
+    await client.query("BEGIN");
+    const { rows: current } = await client.query(`
+      SELECT code, account_type, postable FROM chart_of_accounts
+      WHERE code = $1 FOR UPDATE`,
+    [account.code]);
+    if (!current.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Chart of accounts entry not found." });
+    }
+    if (systemAccountCodes.has(account.code)
+        && (account.type !== current[0].account_type || account.postable !== current[0].postable)) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        error: "The type and posting status of built-in system accounts cannot be changed."
+      });
+    }
+    if (account.type !== current[0].account_type) {
+      const { rows: dependencies } = await client.query(`
+        SELECT
+          EXISTS (SELECT 1 FROM journal_lines WHERE account_code = $1) AS has_journal_activity,
+          EXISTS (SELECT 1 FROM expense_categories WHERE account_code = $1) AS has_expense_category`,
+      [account.code]);
+      if (dependencies[0].has_journal_activity || dependencies[0].has_expense_category) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({
+          error: "An account's type cannot be changed after it is used by posted transactions or expense categories."
+        });
+      }
+    }
+    if (!account.postable) {
+      const { rows: activity } = await client.query(`
+        SELECT 1 FROM journal_lines WHERE account_code = $1 LIMIT 1`,
+      [account.code]);
+      if (activity.length) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({
+          error: "An account with posted journal activity must remain postable."
+        });
+      }
+    }
+    if (account.parentCode) {
+      const { rows: invalidParent } = await client.query(`
+        WITH RECURSIVE descendants(code) AS (
+          SELECT code FROM chart_of_accounts WHERE code = $1
+          UNION
+          SELECT child.code FROM chart_of_accounts child
+          JOIN descendants parent ON child.parent_code = parent.code
+        )
+        SELECT 1 FROM descendants WHERE code = $2`,
+      [account.code, account.parentCode]);
+      if (invalidParent.length) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "The selected parent would create an account hierarchy cycle." });
+      }
+    }
+    const { rows } = await client.query(`
+      UPDATE chart_of_accounts
+      SET name = $1, account_type = $2, parent_code = $3, postable = $4, contra = $5
+      WHERE code = $6
+      RETURNING code, name, account_type AS type, parent_code, postable, contra`,
+    [account.name, account.type, account.parentCode, account.postable, account.contra, account.code]);
+    await client.query("COMMIT");
+    res.json(rows[0]);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}));
+
+app.delete("/api/finance/accounts/:code", requireFinanceEdit, wrap(async (req, res) => {
+  const code = String(req.params.code ?? "").trim();
+  if (systemAccountCodes.has(code)) {
+    return res.status(409).json({ error: "Built-in system accounts cannot be deleted." });
+  }
+  const client = await connectDb();
+  try {
+    await client.query("BEGIN");
+    const { rows: current } = await client.query(`
+      SELECT code FROM chart_of_accounts WHERE code = $1 FOR UPDATE`,
+    [code]);
+    if (!current.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Chart of accounts entry not found." });
+    }
+    const { rows: references } = await client.query(`
+      SELECT
+        EXISTS (SELECT 1 FROM journal_lines WHERE account_code = $1) AS has_journal_activity,
+        EXISTS (SELECT 1 FROM budgets WHERE account_code = $1) AS has_budgets,
+        EXISTS (SELECT 1 FROM expense_categories WHERE account_code = $1) AS has_expense_categories,
+        EXISTS (SELECT 1 FROM chart_of_accounts WHERE parent_code = $1) AS has_children`,
+    [code]);
+    const reference = references[0];
+    if (reference.has_journal_activity || reference.has_budgets
+        || reference.has_expense_categories || reference.has_children) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        error: "This account is in use by journal activity, budgets, expense categories, or child accounts and cannot be deleted."
+      });
+    }
+    await client.query(`DELETE FROM chart_of_accounts WHERE code = $1`, [code]);
+    await client.query("COMMIT");
+    res.json({ ok: true, code });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }));
 
 app.get("/api/finance/journal", requireFinance, wrap(async (req, res) => {
@@ -739,6 +892,105 @@ app.post("/api/finance/expenses", requireFinanceEdit, wrap(async (req, res) => {
   }
 }));
 
+async function reverseExpenseJournal(client, expenseId, userId) {
+  const { rows: entries } = await client.query(`
+    SELECT id FROM journal_entries
+    WHERE ref = $1 AND source IN ('EXPENSE', 'EXPENSE-CORRECTION')
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1`,
+  [expenseId]);
+  if (!entries.length) return false;
+  const { rows: lines } = await client.query(`
+    SELECT account_code, credit AS debit, debit AS credit
+    FROM journal_lines WHERE je_id = $1`,
+  [entries[0].id]);
+  await client.query(`
+    SELECT fn_post_journal(CURRENT_DATE, $1, 'EXPENSE-REVERSAL', $2, $3::jsonb, $4)`,
+  [`Reversal of expense ${expenseId}`, expenseId, JSON.stringify(lines), userId]);
+  return true;
+}
+
+app.put("/api/finance/expenses/:id", requireFinanceEdit, wrap(async (req, res) => {
+  const { category_code, expense_date, amount: rawAmount, vendor, notes } = req.body || {};
+  const amount = Number(rawAmount);
+  if (!expense_date || !category_code || !Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ error: "Expense date, category, and amount are required." });
+  }
+  const client = await connectDb();
+  try {
+    await client.query("BEGIN");
+    const { rows: current } = await client.query(`
+      SELECT id, posted FROM expenses WHERE id = $1 FOR UPDATE`,
+    [req.params.id]);
+    if (!current.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Expense not found." });
+    }
+    const reversed = current[0].posted
+      ? await reverseExpenseJournal(client, req.params.id, req.user.id)
+      : false;
+    const { rows } = await client.query(`
+      UPDATE expenses SET category_code = $1, expense_date = $2, amount = $3,
+        vendor = $4, notes = $5, posted = TRUE
+      WHERE id = $6 RETURNING *`,
+    [category_code, expense_date, amount, vendor || null, notes || null, req.params.id]);
+    if (reversed) {
+      const { rows: category } = await client.query(
+        `SELECT account_code FROM expense_categories WHERE code = $1`,
+        [category_code]
+      );
+      await client.query(`
+        SELECT fn_post_journal(CURRENT_DATE, $1, 'EXPENSE-CORRECTION', $2,
+          $3::jsonb, $4)`,
+      [`Corrected expense ${req.params.id}`, req.params.id, JSON.stringify([
+        { account_code: category[0].account_code, debit: amount, credit: 0 },
+        { account_code: '1100', debit: 0, credit: amount }
+      ]), req.user.id]);
+    } else {
+      const { rows: category } = await client.query(
+        `SELECT account_code FROM expense_categories WHERE code = $1`,
+        [category_code]
+      );
+      await client.query(`
+        SELECT fn_post_journal($1, $2, 'EXPENSE-CORRECTION', $3, $4::jsonb, $5)`,
+      [expense_date, `Expense ${req.params.id}`, req.params.id, JSON.stringify([
+        { account_code: category[0].account_code, debit: amount, credit: 0 },
+        { account_code: '1100', debit: 0, credit: amount }
+      ]), req.user.id]);
+    }
+    await client.query("COMMIT");
+    res.json(rows[0]);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}));
+
+app.delete("/api/finance/expenses/:id", requireFinanceEdit, wrap(async (req, res) => {
+  const client = await connectDb();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(`
+      SELECT posted FROM expenses WHERE id = $1 FOR UPDATE`,
+    [req.params.id]);
+    if (!rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Expense not found." });
+    }
+    if (rows[0].posted) await reverseExpenseJournal(client, req.params.id, req.user.id);
+    await client.query(`DELETE FROM expenses WHERE id = $1`, [req.params.id]);
+    await client.query("COMMIT");
+    res.json({ ok: true, id: req.params.id });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}));
+
 app.get("/api/finance/vat-return", requireFinance, wrap(async (req, res) => {
   const { from, to } = req.query;
   const { rows } = await q(`
@@ -787,6 +1039,115 @@ app.post("/api/finance/fixed-assets", requireFinanceEdit, wrap(async (req, res) 
     ]), req.user.id]);
     await client.query("COMMIT");
     res.json(rows[0]);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}));
+
+app.put("/api/finance/fixed-assets/:id", requireFinanceEdit, wrap(async (req, res) => {
+  const { name, cost: rawCost, life_years: rawLife, salvage: rawSalvage = 0 } = req.body || {};
+  const cost = Number(rawCost);
+  const lifeYears = Number(rawLife);
+  const salvage = Number(rawSalvage);
+  if (!name || !Number.isFinite(cost) || cost <= 0
+      || !Number.isSafeInteger(lifeYears) || lifeYears <= 0
+      || !Number.isFinite(salvage) || salvage < 0 || salvage > cost) {
+    return res.status(400).json({ error: "Enter a valid asset name, cost, useful life, and salvage value." });
+  }
+  const client = await connectDb();
+  try {
+    await client.query("BEGIN");
+    const { rows: current } = await client.query(`
+      SELECT code, cost, life_years, salvage, accumulated_depreciation
+      FROM fixed_assets WHERE id = $1 FOR UPDATE`,
+    [req.params.id]);
+    if (!current.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Fixed asset not found." });
+    }
+    const asset = current[0];
+    const financialValuesChanged = cost !== Number(asset.cost)
+      || lifeYears !== asset.life_years || salvage !== Number(asset.salvage);
+    if (financialValuesChanged && Number(asset.accumulated_depreciation) > 0) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        error: "Cost, useful life, and salvage value cannot be changed after depreciation has been posted."
+      });
+    }
+    const costDelta = Math.round((cost - Number(asset.cost)) * 100) / 100;
+    if (costDelta) {
+      const lines = costDelta > 0
+        ? [
+            { account_code: '1500', debit: costDelta, credit: 0 },
+            { account_code: '1100', debit: 0, credit: costDelta }
+          ]
+        : [
+            { account_code: '1100', debit: -costDelta, credit: 0 },
+            { account_code: '1500', debit: 0, credit: -costDelta }
+          ];
+      await client.query(`
+        SELECT fn_post_journal(CURRENT_DATE, $1, 'ASSET-CORRECTION', $2, $3::jsonb, $4)`,
+      [`Fixed asset cost correction ${asset.code}`, asset.code, JSON.stringify(lines), req.user.id]);
+    }
+    const { rows } = await client.query(`
+      UPDATE fixed_assets SET name = $1, cost = $2, life_years = $3, salvage = $4
+      WHERE id = $5 RETURNING *`,
+    [name.trim(), cost, lifeYears, salvage, req.params.id]);
+    await client.query("COMMIT");
+    res.json(rows[0]);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}));
+
+app.delete("/api/finance/fixed-assets/:id", requireFinanceEdit, wrap(async (req, res) => {
+  const client = await connectDb();
+  try {
+    await client.query("BEGIN");
+    const { rows: assets } = await client.query(`
+      SELECT code, accumulated_depreciation FROM fixed_assets
+      WHERE id = $1 FOR UPDATE`,
+    [req.params.id]);
+    if (!assets.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Fixed asset not found." });
+    }
+    if (Number(assets[0].accumulated_depreciation) > 0) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        error: "A fixed asset with posted depreciation cannot be deleted."
+      });
+    }
+    const { rows: balance } = await client.query(`
+      SELECT jl.account_code, SUM(jl.debit) AS debit, SUM(jl.credit) AS credit
+      FROM journal_entries je JOIN journal_lines jl ON jl.je_id = je.id
+      WHERE je.ref = $1 AND je.source IN ('ASSET', 'ASSET-CORRECTION')
+        AND jl.account_code IN ('1500', '1100')
+      GROUP BY jl.account_code`,
+    [assets[0].code]);
+    if (!balance.length) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({
+        error: "This asset has no individual acquisition journal to reverse and cannot be deleted safely."
+      });
+    }
+    const reversedLines = balance.map(line => ({
+      account_code: line.account_code,
+      debit: Number(line.credit),
+      credit: Number(line.debit)
+    }));
+    await client.query(`
+      SELECT fn_post_journal(CURRENT_DATE, $1, 'ASSET-REMOVAL', $2, $3::jsonb, $4)`,
+    [`Fixed asset removal ${assets[0].code}`, assets[0].code, JSON.stringify(reversedLines), req.user.id]);
+    await client.query(`DELETE FROM fixed_assets WHERE id = $1`, [req.params.id]);
+    await client.query("COMMIT");
+    res.json({ ok: true, id: Number(req.params.id) });
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
@@ -859,6 +1220,10 @@ app.get("/api/finance/budgets", requireFinance, wrap(async (_req, res) => {
 
 app.put("/api/finance/budgets/:period/:code", requireFinanceEdit, wrap(async (req, res) => {
   const amount = Number(req.body?.amount ?? 0);
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(req.params.period)
+      || !Number.isFinite(amount) || amount < 0) {
+    return res.status(400).json({ error: "Enter a valid budget period and non-negative amount." });
+  }
   const { rows } = await q(`
     INSERT INTO budgets (period, account_code, amount)
     VALUES ($1, $2, $3)
@@ -867,6 +1232,14 @@ app.put("/api/finance/budgets/:period/:code", requireFinanceEdit, wrap(async (re
     RETURNING *`,
   [req.params.period, req.params.code, amount]);
   res.json(rows[0]);
+}));
+
+app.delete("/api/finance/budgets/:period/:code", requireFinanceEdit, wrap(async (req, res) => {
+  const { rowCount } = await q(`
+    DELETE FROM budgets WHERE period = $1 AND account_code = $2`,
+  [req.params.period, req.params.code]);
+  if (!rowCount) return res.status(404).json({ error: "Budget not found." });
+  res.json({ ok: true });
 }));
 
 app.get("/api/finance/period-lock", requireFinance, wrap(async (_req, res) => {
@@ -924,6 +1297,14 @@ app.post("/api/finance/bank-recon/:jeLineId", requireFinanceEdit, wrap(async (re
     return res.status(404).json({ error: "Cash or bank journal line not found." });
   }
   res.json(rows[0]);
+}));
+
+app.delete("/api/finance/bank-recon/:jeLineId", requireFinanceEdit, wrap(async (req, res) => {
+  const { rowCount } = await q(`
+    DELETE FROM bank_reconciliations WHERE je_line_id = $1`,
+  [req.params.jeLineId]);
+  if (!rowCount) return res.status(404).json({ error: "Bank reconciliation not found." });
+  res.json({ ok: true });
 }));
 
 app.put("/api/permissions/:role/:perm", wrap(async (req, res) => {
@@ -1674,6 +2055,13 @@ export function initializeFinanceSchema() {
             RAISE EXCEPTION 'Period is locked for backdated journal entries.' USING HINT = 'Use a date after the latest lock date.';
           END IF;
           FOR v_line IN SELECT * FROM jsonb_array_elements(COALESCE(p_lines, '[]'::jsonb)) LOOP
+            IF NOT EXISTS (
+              SELECT 1 FROM chart_of_accounts
+              WHERE code = (v_line->>'account_code')::TEXT AND postable
+            ) THEN
+              RAISE EXCEPTION 'Journal line account % does not exist or is not postable.',
+                v_line->>'account_code';
+            END IF;
             IF COALESCE((v_line->>'debit')::NUMERIC, 0) < 0
                OR COALESCE((v_line->>'credit')::NUMERIC, 0) < 0
                OR (COALESCE((v_line->>'debit')::NUMERIC, 0) > 0

@@ -1662,8 +1662,8 @@ function finPeriodBounds(period) {
   return { from: `${period}-01`, to: `${period}-${String(lastDay).padStart(2, "0")}` };
 }
 
-function finOptions(accounts, selected = "") {
-  return accounts.map(account =>
+function finOptions(accounts, selected = "", postableOnly = false) {
+  return accounts.filter(account => !postableOnly || account.postable).map(account =>
     `<option value="${finEsc(account.code)}" ${account.code === selected ? "selected" : ""}>${finEsc(account.code)} — ${finEsc(account.name)}</option>`
   ).join("");
 }
@@ -1706,9 +1706,25 @@ async function renderFinanceView(view) {
       }
       case "accounts":
         data = await api("/api/finance/accounts");
-        content.innerHTML = finTable(["Code","Account","Type","Parent","Postable","Contra"], data.map(row =>
-          [finEsc(row.code), finEsc(row.name), finEsc(row.type), finEsc(row.parent_code || "—"), row.postable ? "Yes" : "No", row.contra ? "Yes" : "No"]
-        ));
+        content.innerHTML = `${can("finance_edit") ? `<form class="form-row" data-fin-form="account">
+          <label>Code<input name="code" required maxlength="20" pattern="[A-Za-z0-9_-]+" title="Use letters, numbers, underscores, or hyphens."></label>
+          <label>Account name<input name="name" required maxlength="120"></label>
+          <label>Type<select name="type" required>${["Asset","Liability","Equity","Revenue","COGS","Expense"].map(type =>
+            `<option value="${type}">${type}</option>`
+          ).join("")}</select></label>
+          <label>Parent<select name="parent_code"><option value="">No parent</option>${data.map(row =>
+            `<option value="${finEsc(row.code)}">${finEsc(row.code)} — ${finEsc(row.name)}</option>`
+          ).join("")}</select></label>
+          <label><span>Postable</span><input name="postable" type="checkbox" checked></label>
+          <label><span>Contra account</span><input name="contra" type="checkbox"></label>
+          <button class="btn" type="submit">Add Account</button>
+          <button class="btn secondary" type="button" data-fin-action="cancel-edit" hidden>Cancel</button>
+        </form>
+        <p class="sub">Account codes cannot be changed after creation. Built-in accounts are protected; accounts with posted activity or other references cannot be deleted.</p>` : ""}
+        ${finTable(["Code","Account","Type","Parent","Postable","Contra", ...(can("finance_edit") ? ["Actions"] : [])], data.map(row =>
+          [finEsc(row.code), finEsc(row.name), finEsc(row.type), finEsc(row.parent_code || "—"), row.postable ? "Yes" : "No", row.contra ? "Yes" : "No",
+            ...(can("finance_edit") ? [`<button class="btn secondary small" data-fin-action="edit-account" data-code="${finEsc(row.code)}" data-name="${finEsc(row.name)}" data-type="${finEsc(row.type)}" data-parent="${finEsc(row.parent_code || "")}" data-postable="${row.postable}" data-contra="${row.contra}" data-activity="${row.has_activity}">Edit</button> <button class="btn danger small" data-fin-action="delete-account" data-code="${finEsc(row.code)}">Delete</button>`] : [])]
+        ))}`;
         return;
       case "journal":
         [accounts, data] = await Promise.all([api("/api/finance/accounts"), api("/api/finance/journal")]);
@@ -1716,9 +1732,9 @@ async function renderFinanceView(view) {
           ${can("finance_edit") ? `<form class="form-row" data-fin-form="journal">
             <label>Date<input name="date" type="date" required value="${new Date().toISOString().slice(0,10)}"></label>
             <label>Description<input name="description" required maxlength="180"></label>
-            <label>Debit account<select name="debit_account">${finOptions(accounts)}</select></label>
+            <label>Debit account<select name="debit_account">${finOptions(accounts, "", true)}</select></label>
             <label>Debit amount<input name="debit" type="number" min="0.01" step="0.01" required></label>
-            <label>Credit account<select name="credit_account">${finOptions(accounts)}</select></label>
+            <label>Credit account<select name="credit_account">${finOptions(accounts, "", true)}</select></label>
             <label>Credit amount<input name="credit" type="number" min="0.01" step="0.01" required></label>
             <button class="btn" type="submit">Post Journal</button>
           </form>` : ""}
@@ -1773,12 +1789,14 @@ async function renderFinanceView(view) {
         }
       case "bank-recon": {
         const [journal, reconciled] = await Promise.all([api("/api/finance/journal"), api("/api/finance/bank-recon")]);
-        const done = new Set(reconciled.map(row => Number(row.je_line_id)));
+        const done = new Map(reconciled.map(row => [Number(row.je_line_id), row]));
         content.innerHTML = finTable(["Date","Journal","Description","Debit","Credit","Status"], journal.filter(row =>
           ["1100", "1110"].includes(row.account_code) && row.line_id
         ).map(row => [
           finEsc(row.date), finEsc(row.id), finEsc(row.description), finAmount(row.debit), finAmount(row.credit),
-          done.has(Number(row.line_id)) ? "Reconciled" : `<button class="btn" data-fin-action="reconcile" data-line-id="${Number(row.line_id)}">Mark reconciled</button>`
+          done.has(Number(row.line_id))
+            ? `${finEsc(row.reconciled_at || "")} ${can("finance_edit") ? `<button class="btn secondary small" data-fin-action="unreconcile" data-line-id="${Number(row.line_id)}">Undo</button>` : ""}`
+            : can("finance_edit") ? `<button class="btn" data-fin-action="reconcile" data-line-id="${Number(row.line_id)}">Mark reconciled</button>` : "Not reconciled"
         ]));
         return;
       }
@@ -1812,9 +1830,12 @@ async function renderFinanceView(view) {
           <label>Vendor<input name="vendor" maxlength="120"></label>
           <label>Notes<input name="notes" maxlength="240"></label>
           <button class="btn" type="submit">Post Expense</button>
+          <button class="btn secondary" type="button" data-fin-action="cancel-edit" hidden>Cancel</button>
         </form>` : ""}
-        ${finTable(["Voucher","Date","Category","Amount","Vendor","Posted"], expenses.map(row =>
-          [finEsc(row.id), finEsc(row.expense_date), finEsc(row.category_code), finAmount(row.amount), finEsc(row.vendor || "—"), row.posted ? "Yes" : "No"]
+        ${can("finance_edit") ? `<p class="sub">Editing or removing a posted expense creates a correcting journal entry; original ledger entries remain in the audit trail.</p>` : ""}
+        ${finTable(["Voucher","Date","Category","Amount","Vendor","Posted", ...(can("finance_edit") ? ["Actions"] : [])], expenses.map(row =>
+          [finEsc(row.id), finEsc(row.expense_date), finEsc(row.category_code), finAmount(row.amount), finEsc(row.vendor || "—"), row.posted ? "Yes" : "No",
+            ...(can("finance_edit") ? [`<button class="btn secondary small" data-fin-action="edit-expense" data-record-id="${finEsc(row.id)}" data-date="${finEsc(row.expense_date)}" data-category="${finEsc(row.category_code)}" data-amount="${finEsc(row.amount)}" data-vendor="${finEsc(row.vendor || "")}" data-notes="${finEsc(row.notes || "")}">Edit</button> <button class="btn danger small" data-fin-action="delete-expense" data-record-id="${finEsc(row.id)}">Delete</button>`] : [])]
         ))}`;
         return;
         }
@@ -1840,22 +1861,27 @@ async function renderFinanceView(view) {
           <label>Life (years)<input name="life_years" type="number" min="1" step="1" required></label>
           <label>Salvage value<input name="salvage" type="number" min="0" step="0.01" value="0"></label>
           <button class="btn" type="submit">Add Asset</button>
+          <button class="btn secondary" type="button" data-fin-action="cancel-edit" hidden>Cancel</button>
         </form>
         <form class="toolbar" data-fin-form="depreciate"><label>Post depreciation period <input name="period" type="month" required></label><button class="btn" type="submit">Post Depreciation</button></form>` : ""}
-        ${finTable(["Code","Asset","Cost","Life (years)","Salvage","Accumulated Depreciation","Active"], data.map(row =>
-          [finEsc(row.code), finEsc(row.name), finAmount(row.cost), finEsc(row.life_years), finAmount(row.salvage), finAmount(row.accumulated_depreciation), row.active ? "Yes" : "No"]
+        ${can("finance_edit") ? `<p class="sub">Asset cost corrections and removals are posted to the ledger. Assets with posted depreciation cannot have their cost basis changed or be deleted.</p>` : ""}
+        ${finTable(["Code","Asset","Cost","Life (years)","Salvage","Accumulated Depreciation","Active", ...(can("finance_edit") ? ["Actions"] : [])], data.map(row =>
+          [finEsc(row.code), finEsc(row.name), finAmount(row.cost), finEsc(row.life_years), finAmount(row.salvage), finAmount(row.accumulated_depreciation), row.active ? "Yes" : "No",
+            ...(can("finance_edit") ? [`<button class="btn secondary small" data-fin-action="edit-asset" data-record-id="${finEsc(row.id)}" data-name="${finEsc(row.name)}" data-cost="${finEsc(row.cost)}" data-life="${finEsc(row.life_years)}" data-salvage="${finEsc(row.salvage)}" data-depreciation="${finEsc(row.accumulated_depreciation)}">Edit</button> <button class="btn danger small" data-fin-action="delete-asset" data-record-id="${finEsc(row.id)}">Delete</button>`] : [])]
         ))}`;
         return;
       case "budget":
         [accounts, data] = await Promise.all([api("/api/finance/accounts"), api("/api/finance/budgets")]);
         content.innerHTML = `${can("finance_edit") ? `<form class="form-row" data-fin-form="budget">
           <label>Period<input name="period" type="month" required></label>
-          <label>Account<select name="code">${finOptions(accounts)}</select></label>
+          <label>Account<select name="code">${finOptions(accounts, "", true)}</select></label>
           <label>Budget amount<input name="amount" type="number" min="0" step="0.01" required></label>
           <button class="btn" type="submit">Save Budget</button>
+          <button class="btn secondary" type="button" data-fin-action="cancel-edit" hidden>Cancel</button>
         </form>` : ""}
-        ${finTable(["Period","Account","Budget"], data.map(row =>
-          [finEsc(row.period), finEsc(row.account_code), finAmount(row.amount)]
+        ${finTable(["Period","Account","Budget", ...(can("finance_edit") ? ["Actions"] : [])], data.map(row =>
+          [finEsc(row.period), finEsc(row.account_code), finAmount(row.amount),
+            ...(can("finance_edit") ? [`<button class="btn secondary small" data-fin-action="edit-budget" data-period="${finEsc(row.period)}" data-code="${finEsc(row.account_code)}" data-amount="${finEsc(row.amount)}">Edit</button> <button class="btn danger small" data-fin-action="delete-budget" data-period="${finEsc(row.period)}" data-code="${finEsc(row.account_code)}">Delete</button>`] : [])]
         ))}`;
         return;
       case "period-close":
@@ -1901,14 +1927,112 @@ function wireFinanceTabs() {
     const button = event.target.closest("[data-fin-action]");
     if (!button) return;
     try {
-      if (button.dataset.finAction === "receive") {
-        await api(`/api/finance/aging/ar/${encodeURIComponent(button.dataset.recordId)}/receive`, { method: "POST", body: "{}" });
-      } else if (button.dataset.finAction === "pay") {
-        await api(`/api/finance/aging/ap/${encodeURIComponent(button.dataset.recordId)}/pay`, { method: "POST", body: "{}" });
-      } else if (button.dataset.finAction === "reconcile") {
-        await api(`/api/finance/bank-recon/${encodeURIComponent(button.dataset.lineId)}`, { method: "POST", body: "{}" });
+      const action = button.dataset.finAction;
+      if (action === "cancel-edit") {
+        const form = button.closest("form");
+        form.reset();
+        delete form.dataset.recordId;
+        delete form.dataset.period;
+        delete form.dataset.code;
+        form.querySelector('[type="submit"]').textContent =
+          form.dataset.finForm === "expense" ? "Post Expense"
+            : form.dataset.finForm === "asset" ? "Add Asset" : "Save Budget";
+        form.querySelectorAll("[name]").forEach(field => {
+          field.readOnly = false;
+          field.disabled = false;
+        });
+        if (form.dataset.finForm === "account") form.elements.code.readOnly = false;
+        button.hidden = true;
+        return;
       }
-      toast("Finance transaction recorded.", "ok");
+      if (action === "edit-account") {
+        const form = $("financeContent").querySelector('[data-fin-form="account"]');
+        if (!form) return;
+        form.dataset.recordId = button.dataset.code;
+        form.elements.code.value = button.dataset.code;
+        form.elements.code.readOnly = true;
+        form.elements.name.value = button.dataset.name;
+        form.elements.type.value = button.dataset.type;
+        form.elements.parent_code.value = button.dataset.parent;
+        form.elements.postable.checked = button.dataset.postable === "true";
+        form.elements.contra.checked = button.dataset.contra === "true";
+        form.querySelector('[type="submit"]').textContent = "Save Account";
+        form.querySelector('[data-fin-action="cancel-edit"]').hidden = false;
+        form.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      if (action === "edit-expense") {
+        const form = $("financeContent").querySelector('[data-fin-form="expense"]');
+        if (!form) return;
+        form.dataset.recordId = button.dataset.recordId;
+        form.elements.expense_date.value = button.dataset.date;
+        form.elements.category_code.value = button.dataset.category;
+        form.elements.amount.value = button.dataset.amount;
+        form.elements.vendor.value = button.dataset.vendor;
+        form.elements.notes.value = button.dataset.notes;
+        form.querySelector('[type="submit"]').textContent = "Save Expense";
+        form.querySelector('[data-fin-action="cancel-edit"]').hidden = false;
+        form.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      if (action === "edit-asset") {
+        const form = $("financeContent").querySelector('[data-fin-form="asset"]');
+        if (!form) return;
+        form.dataset.recordId = button.dataset.recordId;
+        form.elements.code.value = button.closest("tr").cells[0].textContent.trim();
+        form.elements.code.readOnly = true;
+        form.elements.name.value = button.dataset.name;
+        form.elements.cost.value = button.dataset.cost;
+        form.elements.life_years.value = button.dataset.life;
+        form.elements.salvage.value = button.dataset.salvage;
+        const hasDepreciation = Number(button.dataset.depreciation) > 0;
+        for (const field of [form.elements.cost, form.elements.life_years, form.elements.salvage]) {
+          field.readOnly = hasDepreciation;
+        }
+        form.querySelector('[type="submit"]').textContent = "Save Asset";
+        form.querySelector('[data-fin-action="cancel-edit"]').hidden = false;
+        form.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      if (action === "edit-budget") {
+        const form = $("financeContent").querySelector('[data-fin-form="budget"]');
+        if (!form) return;
+        form.dataset.recordId = "true";
+        form.dataset.period = button.dataset.period;
+        form.dataset.code = button.dataset.code;
+        form.elements.period.value = button.dataset.period;
+        form.elements.period.readOnly = true;
+        form.elements.code.value = button.dataset.code;
+        form.elements.code.disabled = true;
+        form.elements.amount.value = button.dataset.amount;
+        form.querySelector('[type="submit"]').textContent = "Update Budget";
+        form.querySelector('[data-fin-action="cancel-edit"]').hidden = false;
+        form.scrollIntoView({ behavior: "smooth", block: "center" });
+        return;
+      }
+      if (action === "delete-expense") {
+        if (!confirm(`Delete expense ${button.dataset.recordId}? A reversing journal entry will be posted.`)) return;
+        await api(`/api/finance/expenses/${encodeURIComponent(button.dataset.recordId)}`, { method: "DELETE" });
+      } else if (action === "delete-account") {
+        if (!confirm(`Delete account ${button.dataset.code}? This cannot be undone.`)) return;
+        await api(`/api/finance/accounts/${encodeURIComponent(button.dataset.code)}`, { method: "DELETE" });
+      } else if (action === "delete-asset") {
+        if (!confirm("Delete this fixed asset? Its acquisition value will be reversed in the ledger.")) return;
+        await api(`/api/finance/fixed-assets/${encodeURIComponent(button.dataset.recordId)}`, { method: "DELETE" });
+      } else if (action === "delete-budget") {
+        if (!confirm(`Delete the ${button.dataset.period} budget for ${button.dataset.code}?`)) return;
+        await api(`/api/finance/budgets/${encodeURIComponent(button.dataset.period)}/${encodeURIComponent(button.dataset.code)}`, { method: "DELETE" });
+      } else if (action === "receive") {
+        await api(`/api/finance/aging/ar/${encodeURIComponent(button.dataset.recordId)}/receive`, { method: "POST", body: "{}" });
+      } else if (action === "pay") {
+        await api(`/api/finance/aging/ap/${encodeURIComponent(button.dataset.recordId)}/pay`, { method: "POST", body: "{}" });
+      } else if (action === "reconcile") {
+        await api(`/api/finance/bank-recon/${encodeURIComponent(button.dataset.lineId)}`, { method: "POST", body: "{}" });
+      } else if (action === "unreconcile") {
+        if (!confirm("Remove this bank reconciliation mark?")) return;
+        await api(`/api/finance/bank-recon/${encodeURIComponent(button.dataset.lineId)}`, { method: "DELETE" });
+      }
+      toast("Finance changes saved.", "ok");
       await renderFinanceView(document.querySelector("#financeTabs button.active")?.dataset.finView || "overview");
     } catch (err) {
       toast(err.message, "err");
@@ -1922,6 +2046,16 @@ function wireFinanceTabs() {
     const values = Object.fromEntries(new FormData(form).entries());
     try {
       switch (form.dataset.finForm) {
+        case "account":
+          values.postable = form.elements.postable.checked;
+          values.contra = form.elements.contra.checked;
+          await api(form.dataset.recordId
+            ? `/api/finance/accounts/${encodeURIComponent(form.dataset.recordId)}`
+            : "/api/finance/accounts", {
+            method: form.dataset.recordId ? "PUT" : "POST",
+            body: JSON.stringify(values)
+          });
+          break;
         case "journal":
           await api("/api/finance/journal", { method: "POST", body: JSON.stringify({
             date: values.date, description: values.description, source: "Manual",
@@ -1932,18 +2066,29 @@ function wireFinanceTabs() {
           }) });
           break;
         case "expense":
-          await api("/api/finance/expenses", { method: "POST", body: JSON.stringify(values) });
+          await api(form.dataset.recordId
+            ? `/api/finance/expenses/${encodeURIComponent(form.dataset.recordId)}`
+            : "/api/finance/expenses", {
+            method: form.dataset.recordId ? "PUT" : "POST",
+            body: JSON.stringify(values)
+          });
           break;
         case "asset":
-          await api("/api/finance/fixed-assets", { method: "POST", body: JSON.stringify({
-            ...values, cost: Number(values.cost), life_years: Number(values.life_years), salvage: Number(values.salvage || 0)
-          }) });
+          await api(form.dataset.recordId
+            ? `/api/finance/fixed-assets/${encodeURIComponent(form.dataset.recordId)}`
+            : "/api/finance/fixed-assets", {
+            method: form.dataset.recordId ? "PUT" : "POST",
+            body: JSON.stringify({
+              ...values, cost: Number(values.cost), life_years: Number(values.life_years), salvage: Number(values.salvage || 0)
+            })
+          });
           break;
         case "depreciate":
           await api("/api/finance/fixed-assets/depreciate", { method: "POST", body: JSON.stringify(values) });
           break;
         case "budget":
-          await api(`/api/finance/budgets/${encodeURIComponent(values.period)}/${encodeURIComponent(values.code)}`, {
+          values.code ||= form.dataset.code;
+          await api(`/api/finance/budgets/${encodeURIComponent(form.dataset.period || values.period)}/${encodeURIComponent(form.dataset.code || values.code)}`, {
             method: "PUT", body: JSON.stringify({ amount: Number(values.amount) })
           });
           break;
