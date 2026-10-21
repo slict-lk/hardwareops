@@ -201,6 +201,9 @@ app.use("/api/finance", (_req, res, next) => {
 
 function requireFinancePermission(permKey, fallbackMessage) {
   return async (req, res, next) => {
+    if (permKey === "finance_edit" && req.user.role === "Accountant") {
+      return res.status(403).json({ error: fallbackMessage });
+    }
     try {
       const { rows } = await q(`
         SELECT granted FROM role_permissions
@@ -240,6 +243,30 @@ async function requireMasterEdit(req, res, next) {
     console.error("Master edit permission lookup failed:", err);
     res.status(500).json({ error: "Unable to verify master data permissions." });
   }
+}
+
+function requirePermission(permission, message = "This action is not permitted for this role.") {
+  return async (req, res, next) => {
+    try {
+      const { rows } = await q(`
+        SELECT granted FROM role_permissions
+        WHERE role_key = $1 AND perm_key = $2`,
+      [req.user.role, permission]);
+      if (!rows[0]?.granted) return res.status(403).json({ error: message });
+      next();
+    } catch (err) {
+      if (handleDatabaseBusy(err, req, res, "requirePermission")) return;
+      console.error(`Permission lookup failed for ${permission}:`, err);
+      res.status(500).json({ error: "Unable to verify permissions." });
+    }
+  };
+}
+
+function requireOwner(req, res, next) {
+  if (req.user.role !== "Owner") {
+    return res.status(403).json({ error: "Only the Owner can change role permissions." });
+  }
+  next();
 }
 
 async function requireUserManage(req, res, next) {
@@ -1310,11 +1337,15 @@ app.delete("/api/finance/bank-recon/:jeLineId", requireFinanceEdit, wrap(async (
   res.json({ ok: true });
 }));
 
-app.put("/api/permissions/:role/:perm", wrap(async (req, res) => {
+app.put("/api/permissions/:role/:perm", requireOwner, wrap(async (req, res) => {
   const { role, perm } = req.params;
-  const { granted } = req.body;
-  await q(`UPDATE role_permissions SET granted=$1 WHERE role_key=$2 AND perm_key=$3`,
-          [granted, role, perm]);
+  const { granted } = req.body || {};
+  if (typeof granted !== "boolean") {
+    return res.status(400).json({ error: "granted must be a boolean." });
+  }
+  const { rowCount } = await q(`UPDATE role_permissions SET granted=$1 WHERE role_key=$2 AND perm_key=$3`,
+    [granted, role, perm]);
+  if (!rowCount) return res.status(404).json({ error: "Role permission not found." });
   res.json({ ok: true });
 }));
 
@@ -1325,12 +1356,14 @@ app.get("/api/number-series", wrap(async (_req, res) => {
   const { rows } = await q(`SELECT code, prefix, year, next, pad, descr AS "desc" FROM number_series ORDER BY code`);
   res.json(rows);
 }));
-app.post("/api/number-series/:code/reset", wrap(async (req, res) => {
-  await q(`UPDATE number_series SET next=1 WHERE code=$1`, [req.params.code]);
+app.post("/api/number-series/:code/reset", requirePermission("numberseries"), wrap(async (req, res) => {
+  const { rowCount } = await q(`UPDATE number_series SET next=1 WHERE code=$1`, [req.params.code]);
+  if (!rowCount) return res.status(404).json({ error: "Number series not found." });
   res.json({ ok: true });
 }));
-app.post("/api/number-series/:code/advance", wrap(async (req, res) => {
-  await q(`UPDATE number_series SET next = next + 1 WHERE code=$1`, [req.params.code]);
+app.post("/api/number-series/:code/advance", requirePermission("numberseries"), wrap(async (req, res) => {
+  const { rowCount } = await q(`UPDATE number_series SET next = next + 1 WHERE code=$1`, [req.params.code]);
+  if (!rowCount) return res.status(404).json({ error: "Number series not found." });
   res.json({ ok: true });
 }));
 
@@ -1532,6 +1565,10 @@ for (const [resource, definition] of Object.entries(masterCrud)) {
       if (spec.number && raw !== null && raw !== "" && !Number.isFinite(Number(raw))) {
         return res.status(400).json({ error: `${field} must be a valid number.` });
       }
+      if (resource === "items" && ["cost", "price", "reorder"].includes(field)
+          && Number(raw) < 0) {
+        return res.status(400).json({ error: `${field} must not be negative.` });
+      }
     }
 
     const values = updates.map(([field, spec]) => {
@@ -1549,8 +1586,11 @@ for (const [resource, definition] of Object.entries(masterCrud)) {
     if (!rowCount) return res.status(404).json({ error: "Master record not found." });
     res.json({ ok: true });
   });
-  app.put(`/api/${resource}/:id`, requireMasterEdit, updateRecord);
-  if (resource === "items") app.put(`/api/${resource}`, requireMasterEdit, updateRecord);
+  const updatePermissions = resource === "items"
+    ? [requirePermission("inventory"), requireMasterEdit]
+    : [requireMasterEdit];
+  app.put(`/api/${resource}/:id`, ...updatePermissions, updateRecord);
+  if (resource === "items") app.put(`/api/${resource}`, ...updatePermissions, updateRecord);
 
   const deleteRecord = masterMutation(async (req, res) => {
     const id = req.params.id ?? req.query[definition.key];
@@ -1564,8 +1604,8 @@ for (const [resource, definition] of Object.entries(masterCrud)) {
     if (!rowCount) return res.status(404).json({ error: "Master record not found." });
     res.json({ ok: true });
   });
-  app.delete(`/api/${resource}/:id`, requireMasterEdit, deleteRecord);
-  if (resource === "items") app.delete(`/api/${resource}`, requireMasterEdit, deleteRecord);
+  app.delete(`/api/${resource}/:id`, ...updatePermissions, deleteRecord);
+  if (resource === "items") app.delete(`/api/${resource}`, ...updatePermissions, deleteRecord);
 }
 
 app.get("/api/customers", wrap(async (_req,res)=> res.json((await q(`
@@ -1593,8 +1633,14 @@ app.get("/api/items", wrap(async (_req,res)=> res.json((await q(`
   LEFT JOIN suppliers s ON s.id = i.supplier_id
   ORDER BY i.sku`)).rows)));
 
-app.post("/api/items", requireMasterEdit, wrap(async (req,res)=>{
+app.post("/api/items", requirePermission("inventory"), requireMasterEdit, wrap(async (req,res)=>{
   const { sku, name, cat, brand, uom, tax, cost, price, reorder=10, location, supplier_id } = req.body;
+  if (typeof sku !== "string" || !sku.trim() || typeof name !== "string" || !name.trim()
+      || !Number.isFinite(Number(cost)) || Number(cost) < 0
+      || !Number.isFinite(Number(price)) || Number(price) < 0
+      || !Number.isFinite(Number(reorder)) || Number(reorder) < 0) {
+    return res.status(400).json({ error: "Provide an item SKU, name, and non-negative numeric cost, price, and reorder point." });
+  }
   await q(`INSERT INTO items(sku,name,category_code,brand_code,uom_code,tax_code,cost,price,reorder_point,location_code,supplier_id,last_sold)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,CURRENT_DATE)`,
     [sku,name,cat,brand,uom,tax,cost,price,reorder,location,supplier_id]);
@@ -1605,16 +1651,104 @@ app.post("/api/items", requireMasterEdit, wrap(async (req,res)=>{
 /* ============================================================
    SALES / POS
    ============================================================ */
-app.post("/api/sales", wrap(async (req, res) => {
-  const { customer_id, cashier_id, payment, tier, tax_applied, lines } = req.body;
+app.post("/api/sales", requirePermission("pos"), wrap(async (req, res) => {
+  const { customer_id, payment, tier, tax_applied, lines } = req.body || {};
+  const supportedPayments = new Set(["Cash", "Card", "Bank Transfer", "Cheque", "On Account (B2B)"]);
+  if (!supportedPayments.has(payment) || !Array.isArray(lines) || !lines.length || lines.length > 100) {
+    return res.status(400).json({ error: "Select a valid payment method and provide 1 to 100 sale lines." });
+  }
+  if (lines.some(line => !line || typeof line.sku !== "string" || !line.sku.trim()
+      || !Number.isFinite(Number(line.qty)) || Number(line.qty) <= 0
+      || Math.abs(Number(line.qty) * 1000 - Math.round(Number(line.qty) * 1000)) > 1e-8)) {
+    return res.status(400).json({ error: "Every sale line must have a SKU and a positive quantity." });
+  }
+  if (tax_applied === false && !["Owner", "Manager"].includes(req.user.role)) {
+    return res.status(403).json({ error: "Only an Owner or Manager may disable VAT for a sale." });
+  }
+
   const client = await connectDb();
   try {
     await client.query("BEGIN");
+    const skuList = [...new Set(lines.map(line => line.sku.trim()))];
+    const { rows: items } = await client.query(`
+      SELECT i.sku, i.price, i.tax_code, i.cost, inv.qty AS stock,
+             COALESCE(t.rate, 0) AS tax_rate
+      FROM items i JOIN inventory inv ON inv.sku = i.sku
+      LEFT JOIN tax_codes t ON t.code = i.tax_code
+      WHERE i.sku = ANY($1::text[])
+      FOR UPDATE OF i, inv`,
+    [skuList]);
+    const itemBySku = new Map(items.map(item => [item.sku, item]));
+    if (items.length !== skuList.length) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "One or more sale items are unavailable." });
+    }
+    if (items.some(item => !Number.isFinite(Number(item.price)) || Number(item.price) < 0)) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: "One or more items have an invalid selling price." });
+    }
+    const quantities = new Map();
+    for (const line of lines) {
+      const sku = line.sku.trim();
+      const qty = Number(line.qty);
+      quantities.set(sku, (quantities.get(sku) || 0) + qty);
+    }
+    for (const [sku, qty] of quantities) {
+      if (qty > Number(itemBySku.get(sku).stock)) {
+        await client.query("ROLLBACK");
+        return res.status(409).json({ error: `Insufficient stock for ${sku}.` });
+      }
+    }
+
+    let customer = null;
+    if (customer_id !== undefined && customer_id !== null && customer_id !== "") {
+      const { rows } = await client.query(`
+        SELECT id, type, tier_code, credit_limit, credit_used
+        FROM customers WHERE id = $1 FOR UPDATE`,
+      [customer_id]);
+      customer = rows[0];
+      if (!customer) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: "Select a valid customer." });
+      }
+    }
+    if (payment === "On Account (B2B)" && (!customer || customer.type === "B2C_DIY")) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "On-account sales require a B2B customer." });
+    }
+
+    const requestedTier = typeof tier === "string" && tier ? tier : customer?.tier_code || "RETAIL";
+    const effectiveTier = ["Owner", "Manager"].includes(req.user.role)
+      ? requestedTier
+      : (customer?.tier_code || "RETAIL");
+    const { rows: tierRows } = await client.query(
+      `SELECT code, disc FROM price_tiers WHERE code = $1`,
+      [effectiveTier]);
+    if (!tierRows.length) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ error: "Select a valid price tier." });
+    }
+    const discountRate = Number(tierRows[0].disc) / 100;
+    const saleTotal = lines.reduce((total, line) => {
+      const item = itemBySku.get(line.sku.trim());
+      const lineBase = Number(line.qty) * Number(item.price) * (1 - discountRate);
+      return total + lineBase + (tax_applied === false ? 0 : lineBase * Number(item.tax_rate) / 100);
+    }, 0);
+    if (payment === "On Account (B2B)"
+        && saleTotal > Number(customer.credit_limit) - Number(customer.credit_used)) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: "The sale exceeds the customer's available credit." });
+    }
+    const canonicalLines = lines.map(line => ({
+      sku: line.sku.trim(),
+      qty: Number(line.qty),
+      unit_price: Number(itemBySku.get(line.sku.trim()).price)
+    }));
+    const applyTax = tax_applied !== false;
     const { rows } = await client.query(
       `SELECT sp_complete_sale($1,$2,$3,$4,$5,$6) AS sale_id`,
-      [customer_id || null, cashier_id, payment, tier, tax_applied, JSON.stringify(lines)]
+      [customer?.id || null, req.user.id, payment, effectiveTier, applyTax, JSON.stringify(canonicalLines)]
     );
-    await client.query(`SELECT fn_post_sale_finance($1, $2)`, [rows[0].sale_id, cashier_id || null]);
     await client.query("COMMIT");
     res.json({ id: rows[0].sale_id });
   } catch (err) {
@@ -1625,7 +1759,7 @@ app.post("/api/sales", wrap(async (req, res) => {
   }
 }));
 
-app.get("/api/sales", wrap(async (req,res)=>{
+app.get("/api/sales", requirePermission("pos"), wrap(async (req,res)=>{
   const { from, to } = req.query;
   const { rows } = await q(`
     SELECT s.id, s.sale_date AS date, s.sale_time AS time, s.customer_id,
@@ -1641,7 +1775,7 @@ app.get("/api/sales", wrap(async (req,res)=>{
   res.json(rows);
 }));
 
-app.get("/api/sales/:id/lines", wrap(async (req,res)=>{
+app.get("/api/sales/:id/lines", requirePermission("pos"), wrap(async (req,res)=>{
   const { rows } = await q(`SELECT sl.sku, i.name, sl.qty, sl.unit_price AS price,
       sl.tax_code AS tax, sl.cost_at_sale AS cost, i.uom_code AS uom
     FROM sale_lines sl JOIN items i ON i.sku = sl.sku WHERE sl.sale_id = $1`, [req.params.id]);
@@ -1665,7 +1799,7 @@ function periodRange(period, ref) {
   return [from.toISOString().slice(0,10), to.toISOString().slice(0,10)];
 }
 
-app.get("/api/analytics/summary", wrap(async (req,res)=>{
+app.get("/api/analytics/summary", requirePermission("analytics"), wrap(async (req,res)=>{
   const [from, to] = periodRange(req.query.period || "weekly", req.query.date || new Date());
   const { rows } = await q(`
     SELECT
@@ -1682,7 +1816,7 @@ app.get("/api/analytics/summary", wrap(async (req,res)=>{
   res.json({ range: { from, to }, ...rows[0] });
 }));
 
-app.get("/api/analytics/items", wrap(async (req,res)=>{
+app.get("/api/analytics/items", requirePermission("analytics"), wrap(async (req,res)=>{
   const [from, to] = periodRange(req.query.period || "weekly", req.query.date || new Date());
   const { rows } = await q(`
     SELECT sl.sku, i.name, i.uom_code AS uom,
@@ -1699,7 +1833,7 @@ app.get("/api/analytics/items", wrap(async (req,res)=>{
   res.json(rows);
 }));
 
-app.get("/api/analytics/cash-credit", wrap(async (req,res)=>{
+app.get("/api/analytics/cash-credit", requirePermission("analytics"), wrap(async (req,res)=>{
   const [from, to] = periodRange(req.query.period || "weekly", req.query.date || new Date());
   const { rows } = await q(`
     SELECT s.id, s.sale_date AS date, COALESCE(c.name,'Walk-in') AS customer,
@@ -1711,17 +1845,17 @@ app.get("/api/analytics/cash-credit", wrap(async (req,res)=>{
   res.json(rows);
 }));
 
-app.get("/api/analytics/customer-credit", wrap(async (_req,res)=>{
+app.get("/api/analytics/customer-credit", requirePermission("analytics"), wrap(async (_req,res)=>{
   const { rows } = await q(`SELECT * FROM v_customer_credit ORDER BY name`);
   res.json(rows);
 }));
 
-app.get("/api/analytics/supplier-purchases", wrap(async (_req,res)=>{
+app.get("/api/analytics/supplier-purchases", requirePermission("analytics"), wrap(async (_req,res)=>{
   const { rows } = await q(`SELECT * FROM v_supplier_purchases ORDER BY total_value DESC`);
   res.json(rows);
 }));
 
-app.get("/api/analytics/gmroi", wrap(async (_req,res)=>{
+app.get("/api/analytics/gmroi", requirePermission("gmroi"), wrap(async (_req,res)=>{
   const { rows } = await q(`SELECT * FROM v_gmroi_category ORDER BY gmroi DESC`);
   res.json(rows);
 }));
@@ -1744,15 +1878,23 @@ app.get("/api/purchase-orders", wrap(async (_req,res)=>{
   res.json(rows);
 }));
 
-app.post("/api/purchase-orders", wrap(async (req,res)=>{
-  const { supplier_id, lines, created_by } = req.body;
+app.post("/api/purchase-orders", requirePermission("po"), wrap(async (req,res)=>{
+  const { supplier_id, lines } = req.body || {};
+  if (!Number.isInteger(Number(supplier_id)) || !Array.isArray(lines)
+      || !lines.length || lines.length > 100
+      || lines.some(line => !line || typeof line.sku !== "string"
+        || !Number.isFinite(Number(line.qty)) || Number(line.qty) <= 0
+        || !Number.isFinite(Number(line.cost)) || Number(line.cost) < 0)) {
+    return res.status(400).json({ error: "A supplier and 1 to 100 valid purchase lines are required." });
+  }
   const { rows: [{ next_number }] } = await q(`SELECT fn_next_number('PO') AS next_number`);
   const id = next_number;
   const { rows: s } = await q(`SELECT lead_days FROM suppliers WHERE id=$1`, [supplier_id]);
+  if (!s.length) return res.status(400).json({ error: "Select a valid supplier." });
   const expected = new Date(); expected.setDate(expected.getDate() + (s[0]?.lead_days || 3));
   await q(`INSERT INTO purchase_orders(id,supplier_id,order_date,status,expected_date,created_by)
            VALUES ($1,$2,CURRENT_DATE,'Sent',$3,$4)`,
-    [id, supplier_id, expected.toISOString().slice(0,10), created_by || null]);
+    [id, supplier_id, expected.toISOString().slice(0,10), req.user.id]);
   for (const l of lines) {
     await q(`INSERT INTO po_lines(po_id,sku,qty,cost) VALUES ($1,$2,$3,$4)`,
       [id, l.sku, l.qty, l.cost]);
@@ -1760,14 +1902,15 @@ app.post("/api/purchase-orders", wrap(async (req,res)=>{
   res.json({ id });
 }));
 
-app.post("/api/grns", wrap(async (req,res)=>{
-  const { po_id, notes, received_by } = req.body;
+app.post("/api/grns", requirePermission("grn"), wrap(async (req,res)=>{
+  const { po_id, notes } = req.body || {};
   const { rows: po } = await q(`SELECT supplier_id FROM purchase_orders WHERE id=$1`, [po_id]);
+  if (!po.length) return res.status(404).json({ error: "Purchase order not found." });
   const { rows: [{ next_number }] } = await q(`SELECT fn_next_number('GRN') AS next_number`);
   const id = next_number;
   await q(`INSERT INTO grns(id,po_id,supplier_id,date_received,notes,received_by)
            VALUES ($1,$2,$3,CURRENT_DATE,$4,$5)`,
-    [id, po_id, po[0].supplier_id, notes || null, received_by || null]);
+    [id, po_id, po[0].supplier_id, notes || null, req.user.id]);
   await q(`INSERT INTO grn_lines(grn_id,sku,qty,cost)
            SELECT $1, sku, qty, cost FROM po_lines WHERE po_id = $2`, [id, po_id]);
   await q(`UPDATE purchase_orders SET status='Received', received_date=CURRENT_DATE WHERE id=$1`, [po_id]);
@@ -1801,11 +1944,18 @@ app.get("/api/invoices", wrap(async (_req,res)=>{
   res.json(rows);
 }));
 
-app.post("/api/invoices/:id/pay", wrap(async (req,res)=>{
-  const { amount } = req.body;
-  await q(`UPDATE invoices SET amount_paid = amount_paid + $1,
-             status = CASE WHEN amount_paid + $1 >= total THEN 'Paid' ELSE 'Partial' END
-           WHERE id = $2`, [amount, req.params.id]);
+app.post("/api/invoices/:id/pay", requireFinanceEdit, wrap(async (req,res)=>{
+  const amount = Number(req.body?.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ error: "Payment amount must be greater than zero." });
+  }
+  const { rows } = await q(`
+    UPDATE invoices SET amount_paid = amount_paid + $1,
+      status = CASE WHEN amount_paid + $1 >= total THEN 'Paid' ELSE 'Partial' END
+    WHERE id = $2 AND amount_paid + $1 <= total
+    RETURNING id`,
+  [amount, req.params.id]);
+  if (!rows.length) return res.status(404).json({ error: "Invoice not found or payment exceeds its balance." });
   res.json({ ok: true });
 }));
 
@@ -1821,7 +1971,7 @@ app.get("/api/services", wrap(async (_req,res)=>{
   res.json(rows);
 }));
 
-app.post("/api/services", wrap(async (req,res)=>{
+app.post("/api/services", requirePermission("services"), wrap(async (req,res)=>{
   const { service_type, customer_id, price, notes } = req.body;
   const { rows: [{ next_number }] } = await q(`SELECT fn_next_number('SRV') AS next_number`);
   await q(`INSERT INTO service_tickets(id,service_type,customer_id,date_in,status,price,notes)
@@ -1840,7 +1990,7 @@ app.get("/api/rentals", wrap(async (_req,res)=>{
   res.json(rows);
 }));
 
-app.post("/api/rentals", wrap(async (req, res) => {
+app.post("/api/rentals", requirePermission("rentals"), wrap(async (req, res) => {
   const { tool_sku, tool_name, customer_id, date_out, date_due, rate_per_day, late_fee = 0 } = req.body || {};
   const rate = Number(rate_per_day);
   const fee = Number(late_fee);
@@ -1866,15 +2016,21 @@ app.get("/api/shrink", wrap(async (_req,res)=>{
   res.json(rows);
 }));
 
-app.post("/api/shrink", wrap(async (req,res)=>{
-  const { sku, qty, reason, logged_by } = req.body;
+app.post("/api/shrink", requirePermission("shrink"), wrap(async (req,res)=>{
+  const { sku, qty, reason } = req.body || {};
+  if (!Number.isFinite(Number(qty)) || Number(qty) <= 0) {
+    return res.status(400).json({ error: "Quantity must be greater than zero." });
+  }
   const { rows: it } = await q(`SELECT cost, category_code FROM items WHERE sku=$1`, [sku]);
+  if (!it.length || !["Theft", "Damage", "Miscount", "Vendor_Short", "Unknown"].includes(reason)) {
+    return res.status(400).json({ error: "Select a valid item and shrinkage reason." });
+  }
   const { rows: [{ next_number }] } = await q(`SELECT fn_next_number('SHR') AS next_number`);
   const value = Number(it[0]?.cost || 0) * Number(qty);
   const dept = it[0]?.category_code || "Unknown";
   await q(`INSERT INTO shrink_incidents(id,incident_date,sku,qty,reason,department,value,logged_by)
            VALUES ($1,CURRENT_DATE,$2,$3,$4,$5,$6,$7)`,
-    [next_number, sku, qty, reason, dept, value, logged_by || null]);
+    [next_number, sku, qty, reason, dept, value, req.user.id]);
   res.json({ id: next_number });
 }));
 

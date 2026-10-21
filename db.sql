@@ -91,7 +91,7 @@ INSERT INTO role_permissions (role_key, perm_key, granted) VALUES
  ('Accountant','grn',FALSE),('Accountant','services',FALSE),('Accountant','rentals',FALSE),('Accountant','b2b',TRUE),
  ('Accountant','shrink',FALSE),('Accountant','gmroi',TRUE),('Accountant','analytics',TRUE),('Accountant','masters',FALSE),
  ('Accountant','masters_edit',FALSE),('Accountant','numberseries',TRUE),('Accountant','users_manage',FALSE),
- ('Accountant','finance',TRUE),('Accountant','finance_edit',TRUE);
+ ('Accountant','finance',TRUE),('Accountant','finance_edit',FALSE);
 
 -- ============================================================
 -- USERS
@@ -315,8 +315,8 @@ CREATE TABLE items (
     brand_code TEXT REFERENCES brands(code),
     uom_code TEXT REFERENCES uoms(code),
     tax_code TEXT REFERENCES tax_codes(code),
-    cost NUMERIC(14,2) NOT NULL DEFAULT 0,
-    price NUMERIC(14,2) NOT NULL DEFAULT 0,
+    cost NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (cost >= 0),
+    price NUMERIC(14,2) NOT NULL DEFAULT 0 CHECK (price >= 0),
     reorder_point INTEGER NOT NULL DEFAULT 10,
     supplier_id INTEGER REFERENCES suppliers(id),
     location_code TEXT REFERENCES locations(code),
@@ -429,8 +429,8 @@ CREATE TABLE sale_lines (
     id SERIAL PRIMARY KEY,
     sale_id TEXT NOT NULL REFERENCES sales(id) ON DELETE CASCADE,
     sku TEXT NOT NULL REFERENCES items(sku),
-    qty NUMERIC(14,3) NOT NULL,
-    unit_price NUMERIC(14,2) NOT NULL,
+    qty NUMERIC(14,3) NOT NULL CHECK (qty > 0),
+    unit_price NUMERIC(14,2) NOT NULL CHECK (unit_price >= 0),
     tax_code TEXT REFERENCES tax_codes(code),
     cost_at_sale NUMERIC(14,2) NOT NULL DEFAULT 0
 );

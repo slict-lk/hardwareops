@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 export function getDatabaseConfig(env = process.env) {
   const target = env.DATABASE_TARGET?.trim().toLowerCase();
   let databaseUrl;
@@ -39,8 +41,16 @@ export function getDatabaseConfig(env = process.env) {
   }
 
   connectionUrl.searchParams.delete("sslmode");
+  const ssl = sslMode === "require"
+    ? {
+        rejectUnauthorized: true,
+        ...(env.PGSSLROOTCERT
+          ? { ca: readFileSync(env.PGSSLROOTCERT, "utf8") }
+          : {})
+      }
+    : false;
   return {
     connectionString: connectionUrl.toString(),
-    ssl: sslMode === "require" ? { rejectUnauthorized: false } : false
+    ssl
   };
 }

@@ -1682,8 +1682,8 @@ function renderDashboard() {
   $("lowStockTable").innerHTML = low.length ? table([
     ["SKU","Item","Qty","Reorder","UOM","Supplier","Lead"],
     ...low.map(i => [
-      i.sku, i.name, `<span class="badge bad">${i.qty}</span>`, i.reorder, i.uom,
-      i.supplier || "—",
+      finEsc(i.sku), finEsc(i.name), `<span class="badge bad">${finEsc(i.qty)}</span>`, finEsc(i.reorder), finEsc(i.uom),
+      finEsc(i.supplier || "—"),
       (supplierMaster.find(s=>s.name===i.supplier)?.lead || "—") + " days"
     ])
   ]) : "<p style='color:var(--muted);font-size:13px;'>No items below reorder point.</p>";
@@ -2212,11 +2212,11 @@ function renderPOSGrid() {
     !q || i.sku.toLowerCase().includes(q) || i.name.toLowerCase().includes(q)
   );
   $("posGrid").innerHTML = rows.map(i => `
-    <div class="pos-item" data-sku="${i.sku}">
-      <div class="sku">${i.sku} · ${i.uom}</div>
-      <div class="name">${i.name}</div>
+    <div class="pos-item" data-sku="${finEsc(i.sku)}">
+      <div class="sku">${finEsc(i.sku)} · ${finEsc(i.uom)}</div>
+      <div class="name">${finEsc(i.name)}</div>
       <div class="price">${money(i.price)}</div>
-      <div style="font-size:10px;color:var(--muted-soft);margin-top:4px;">${i.location} · ${i.qty}</div>
+      <div style="font-size:10px;color:var(--muted-soft);margin-top:4px;">${finEsc(i.location)} · ${finEsc(i.qty)}</div>
     </div>
   `).join("");
   document.querySelectorAll(".pos-item").forEach(el => el.addEventListener("click", () => addToCart(el.dataset.sku)));
@@ -2367,12 +2367,12 @@ function renderInventory() {
       if (lowFlag(i)) badge = `<span class="badge bad">REORDER</span>`;
       else if (deadFlag(i)) badge = `<span class="badge warn">DEAD</span>`;
       return [
-        `<code>${i.sku}</code>`, i.name,
-        getCategory(i.cat)?.name || i.cat,
-        getBrand(i.brand)?.name || i.brand,
-        `<span class="badge purple">${i.uom}</span>`,
-        `<span class="badge gold">${i.tax}</span>`,
-        i.location, i.qty, i.reorder, money(i.cost), money(i.price),
+        `<code>${finEsc(i.sku)}</code>`, finEsc(i.name),
+        finEsc(getCategory(i.cat)?.name || i.cat),
+        finEsc(getBrand(i.brand)?.name || i.brand),
+        `<span class="badge purple">${finEsc(i.uom)}</span>`,
+        `<span class="badge gold">${finEsc(i.tax)}</span>`,
+        finEsc(i.location), finEsc(i.qty), finEsc(i.reorder), money(i.cost), money(i.price),
         `<span class="badge ${mClass}">${m.toFixed(1)}%</span>`, badge
       ];
     })
@@ -2394,7 +2394,7 @@ function renderPO() {
 
   const skuSel = $("poSKU");
   skuSel.innerHTML = inventory.map(i =>
-    `<option value="${i.sku}" data-cost="${i.cost}">${i.sku} — ${i.name} (${i.uom})</option>`
+    `<option value="${finEsc(i.sku)}" data-cost="${finEsc(i.cost)}">${finEsc(i.sku)} — ${finEsc(i.name)} (${finEsc(i.uom)})</option>`
   ).join("");
   skuSel.onchange = () => {
     const opt = skuSel.options[skuSel.selectedIndex];
@@ -2648,7 +2648,7 @@ function renderB2B() {
 function renderShrink() {
   const sel = $("shrinkSKU");
   sel.innerHTML = inventory.map(i =>
-    `<option value="${i.sku}">${i.sku} — ${i.name}</option>`
+    `<option value="${finEsc(i.sku)}">${finEsc(i.sku)} — ${finEsc(i.name)}</option>`
   ).join("");
 
   const total = shrink.reduce((s, i) => s + Number(i.value), 0);
@@ -2904,9 +2904,10 @@ function renderItems() {
   $("itmTable").innerHTML = table([
     ["SKU","Name","Cat","Brand","UOM","Tax","Loc","Cost","Price","Actions"],
     ...inventory.map(i => [
-      `<code>${i.sku}</code>`, i.name, getCategory(i.cat)?.name || i.cat, getBrand(i.brand)?.name || i.brand,
-      `<span class="badge purple">${i.uom}</span>`, `<span class="badge gold">${i.tax}</span>`,
-      i.location, money(i.cost), money(i.price), masterActionCell("items", i)
+      `<code>${finEsc(i.sku)}</code>`, finEsc(i.name),
+      finEsc(getCategory(i.cat)?.name || i.cat), finEsc(getBrand(i.brand)?.name || i.brand),
+      `<span class="badge purple">${finEsc(i.uom)}</span>`, `<span class="badge gold">${finEsc(i.tax)}</span>`,
+      finEsc(i.location), money(i.cost), money(i.price), masterActionCell("items", i)
     ])
   ]);
 }
