@@ -16,6 +16,7 @@ const poolKey = Symbol.for("hardwareops.postgresPool");
 const authSchemaKey = Symbol.for("hardwareops.authSchemaInitialization");
 const financeSchemaKey = Symbol.for("hardwareops.financeSchemaInitialization");
 const requestContext = new AsyncLocalStorage();
+const financeDatabaseContext = new AsyncLocalStorage();
 app.use(cors());
 app.use(express.json());
 app.use((req, _res, next) => {
@@ -69,6 +70,8 @@ function getPool() {
 }
 
 const q = async (text, params) => {
+  const client = financeDatabaseContext.getStore();
+  if (client) return client.query(text, params);
   return getPool().query(text, params);
 };
 
@@ -1894,507 +1897,511 @@ export function initializeAuthSchema() {
 export function initializeFinanceSchema() {
   if (!globalThis[financeSchemaKey]) {
     globalThis[financeSchemaKey] = (async () => {
-      await q(`
-        CREATE TABLE IF NOT EXISTS chart_of_accounts (
-          code TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          account_type TEXT NOT NULL CHECK (account_type IN ('Asset','Liability','Equity','Revenue','COGS','Expense')),
-          parent_code TEXT,
-          postable BOOLEAN NOT NULL DEFAULT TRUE,
-          contra BOOLEAN NOT NULL DEFAULT FALSE
-        )`);
-      await q(`
-        INSERT INTO chart_of_accounts (code, name, account_type, parent_code, postable, contra)
-        VALUES
-          ('1100', 'Cash and Cash Equivalents', 'Asset', NULL, TRUE, FALSE),
-          ('1110', 'Bank Current Account', 'Asset', NULL, TRUE, FALSE),
-          ('1200', 'Accounts Receivable', 'Asset', NULL, TRUE, FALSE),
-          ('1300', 'Inventory', 'Asset', NULL, TRUE, FALSE),
-          ('1400', 'Cost of Goods Sold', 'COGS', NULL, TRUE, FALSE),
-          ('1500', 'Fixed Assets', 'Asset', NULL, TRUE, FALSE),
-          ('1510', 'Equipment', 'Asset', '1500', TRUE, FALSE),
-          ('1520', 'Vehicles', 'Asset', '1500', TRUE, FALSE),
-          ('1690', 'Accumulated Depreciation', 'Asset', NULL, TRUE, TRUE),
-          ('2100', 'Accounts Payable', 'Liability', NULL, TRUE, FALSE),
-          ('2200', 'VAT Payable', 'Liability', NULL, TRUE, FALSE),
-          ('2210', 'VAT Receivable', 'Asset', NULL, TRUE, FALSE),
-          ('2300', 'Customer Deposits', 'Liability', NULL, TRUE, FALSE),
-          ('2400', 'Accrued Expenses', 'Liability', NULL, TRUE, FALSE),
-          ('2500', 'Other Tax Payable', 'Liability', NULL, TRUE, FALSE),
-          ('3000', 'Owners Equity', 'Equity', NULL, TRUE, FALSE),
-          ('3100', 'Retained Earnings', 'Equity', NULL, TRUE, FALSE),
-          ('3200', 'Owner Drawings', 'Equity', NULL, TRUE, TRUE),
-          ('4100', 'Sales Revenue', 'Revenue', NULL, TRUE, FALSE),
-          ('4200', 'Service Revenue', 'Revenue', NULL, TRUE, FALSE),
-          ('4300', 'Rental Revenue', 'Revenue', NULL, TRUE, FALSE),
-          ('4400', 'Other Income', 'Revenue', NULL, TRUE, FALSE),
-          ('4900', 'Sales Returns', 'Revenue', NULL, TRUE, TRUE),
-          ('5100', 'Operating Expenses', 'Expense', NULL, TRUE, FALSE),
-          ('6100', 'Rent Expense', 'Expense', NULL, TRUE, FALSE),
-          ('6200', 'Utilities Expense', 'Expense', NULL, TRUE, FALSE),
-          ('6300', 'Travel Expense', 'Expense', NULL, TRUE, FALSE),
-          ('6400', 'Supplies Expense', 'Expense', NULL, TRUE, FALSE),
-          ('6500', 'Depreciation Expense', 'Expense', NULL, TRUE, FALSE),
-          ('6600', 'Shrinkage Expense', 'Expense', NULL, TRUE, FALSE),
-          ('6700', 'Bank Charges', 'Expense', NULL, TRUE, FALSE),
-          ('6800', 'Repairs and Maintenance', 'Expense', NULL, TRUE, FALSE),
-          ('6900', 'Other Expense', 'Expense', NULL, TRUE, FALSE)
-        ON CONFLICT (code) DO NOTHING`);
-      await q(`
-        CREATE TABLE IF NOT EXISTS journal_entries (
-          id TEXT PRIMARY KEY,
-          entry_date DATE NOT NULL,
-          description TEXT NOT NULL,
-          source TEXT NOT NULL,
-          ref TEXT,
-          created_by INTEGER REFERENCES users(id),
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )`);
-      await q(`
-        CREATE TABLE IF NOT EXISTS journal_lines (
-          id SERIAL PRIMARY KEY,
-          je_id TEXT NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
-          account_code TEXT NOT NULL REFERENCES chart_of_accounts(code),
-          debit NUMERIC(14,2) NOT NULL DEFAULT 0,
-          credit NUMERIC(14,2) NOT NULL DEFAULT 0
-        )`);
-      await q(`
-        CREATE TABLE IF NOT EXISTS expense_categories (
-          code TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          account_code TEXT NOT NULL DEFAULT '5100' REFERENCES chart_of_accounts(code)
-        )`);
-      await q(`ALTER TABLE expense_categories ADD COLUMN IF NOT EXISTS account_code TEXT REFERENCES chart_of_accounts(code)`);
-      await q(`
-        UPDATE expense_categories
-        SET account_code = CASE code
-          WHEN 'ELEC' THEN '6200'
-          WHEN 'RENT' THEN '6100'
-          WHEN 'TRVL' THEN '6300'
-          WHEN 'SUPP' THEN '6400'
-          ELSE '5100'
-        END
-        WHERE account_code IS NULL`);
-      await q(`ALTER TABLE expense_categories ALTER COLUMN account_code SET DEFAULT '5100'`);
-      await q(`ALTER TABLE expense_categories ALTER COLUMN account_code SET NOT NULL`);
-      await q(`
-        CREATE TABLE IF NOT EXISTS expenses (
-          id TEXT PRIMARY KEY,
-          category_code TEXT REFERENCES expense_categories(code),
-          expense_date DATE NOT NULL,
-          amount NUMERIC(14,2) NOT NULL DEFAULT 0,
-          vendor TEXT,
-          notes TEXT,
-          posted BOOLEAN NOT NULL DEFAULT FALSE,
-          created_by INTEGER REFERENCES users(id),
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )`);
-      await q(`
-        CREATE TABLE IF NOT EXISTS fixed_assets (
-          id SERIAL PRIMARY KEY,
-          code TEXT UNIQUE NOT NULL,
-          name TEXT NOT NULL,
-          cost NUMERIC(14,2) NOT NULL DEFAULT 0,
-          life_years INTEGER NOT NULL DEFAULT 1,
-          salvage NUMERIC(14,2) NOT NULL DEFAULT 0,
-          accumulated_depreciation NUMERIC(14,2) NOT NULL DEFAULT 0,
-          active BOOLEAN NOT NULL DEFAULT TRUE,
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )`);
-      await q(`
-        CREATE TABLE IF NOT EXISTS budgets (
-          period TEXT NOT NULL,
-          account_code TEXT NOT NULL REFERENCES chart_of_accounts(code),
-          amount NUMERIC(14,2) NOT NULL DEFAULT 0,
-          PRIMARY KEY (period, account_code)
-        )`);
-      await q(`
-        CREATE TABLE IF NOT EXISTS period_locks (
-          lock_through_date DATE PRIMARY KEY,
-          created_by INTEGER REFERENCES users(id),
-          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )`);
-      await q(`
-        CREATE TABLE IF NOT EXISTS bank_reconciliations (
-          id SERIAL PRIMARY KEY,
-          je_line_id INTEGER NOT NULL REFERENCES journal_lines(id),
-          reconciled_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          reconciled_by INTEGER REFERENCES users(id),
-          UNIQUE (je_line_id)
-        )`);
-      await q(`CREATE UNIQUE INDEX IF NOT EXISTS uq_bank_reconciliations_line ON bank_reconciliations (je_line_id)`);
-      await q(`ALTER TABLE grns ADD COLUMN IF NOT EXISTS paid BOOLEAN NOT NULL DEFAULT FALSE`);
-      await q(`ALTER TABLE grns ADD COLUMN IF NOT EXISTS amount_paid NUMERIC(14,2) NOT NULL DEFAULT 0`);
-      await q(`
-        INSERT INTO number_series (code, prefix, year, next, pad, descr)
-        VALUES
-          ('JE', 'JE', TO_CHAR(CURRENT_DATE, 'YYYY'), 1, 5, 'Journal Entry'),
-          ('EXP', 'EXP', TO_CHAR(CURRENT_DATE, 'YYYY'), 1, 5, 'Expense Voucher')
-        ON CONFLICT (code) DO NOTHING`);
-      await q(`
-        CREATE OR REPLACE FUNCTION fn_post_journal(
-          p_entry_date DATE,
-          p_description TEXT,
-          p_source TEXT,
-          p_ref TEXT,
-          p_lines JSONB,
-          p_created_by INTEGER
-        ) RETURNS TEXT AS $$
-        DECLARE
-          v_je_id TEXT;
-          v_debit NUMERIC(14,2) := 0;
-          v_credit NUMERIC(14,2) := 0;
-          v_line JSONB;
-        BEGIN
-          IF jsonb_typeof(COALESCE(p_lines, '[]'::jsonb)) <> 'array'
-             OR jsonb_array_length(COALESCE(p_lines, '[]'::jsonb)) < 2 THEN
-            RAISE EXCEPTION 'Journal entry requires at least two lines.';
-          END IF;
-          PERFORM pg_advisory_xact_lock(7319422);
-          IF EXISTS (SELECT 1 FROM period_locks WHERE lock_through_date >= p_entry_date) THEN
-            RAISE EXCEPTION 'Period is locked for backdated journal entries.' USING HINT = 'Use a date after the latest lock date.';
-          END IF;
-          FOR v_line IN SELECT * FROM jsonb_array_elements(COALESCE(p_lines, '[]'::jsonb)) LOOP
-            IF NOT EXISTS (
-              SELECT 1 FROM chart_of_accounts
-              WHERE code = (v_line->>'account_code')::TEXT AND postable
-            ) THEN
-              RAISE EXCEPTION 'Journal line account % does not exist or is not postable.',
-                v_line->>'account_code';
-            END IF;
-            IF COALESCE((v_line->>'debit')::NUMERIC, 0) < 0
-               OR COALESCE((v_line->>'credit')::NUMERIC, 0) < 0
-               OR (COALESCE((v_line->>'debit')::NUMERIC, 0) > 0
-                   AND COALESCE((v_line->>'credit')::NUMERIC, 0) > 0) THEN
-              RAISE EXCEPTION 'Journal line amounts must be non-negative and either debit or credit.';
-            END IF;
-            v_debit := v_debit + COALESCE((v_line->>'debit')::NUMERIC, 0);
-            v_credit := v_credit + COALESCE((v_line->>'credit')::NUMERIC, 0);
-          END LOOP;
-          IF v_debit <= 0 OR ABS(v_debit - v_credit) > 0.009 THEN
-            RAISE EXCEPTION 'Journal entry must balance.' USING HINT = 'Debits and credits must match.';
-          END IF;
-          v_je_id := fn_next_number('JE');
-          INSERT INTO journal_entries (id, entry_date, description, source, ref, created_by)
-          VALUES (v_je_id, p_entry_date, p_description, p_source, p_ref, p_created_by);
-          INSERT INTO journal_lines (je_id, account_code, debit, credit)
-          SELECT v_je_id,
-                 (line->>'account_code')::TEXT,
-                 COALESCE((line->>'debit')::NUMERIC, 0),
-                 COALESCE((line->>'credit')::NUMERIC, 0)
-          FROM jsonb_array_elements(COALESCE(p_lines, '[]'::jsonb)) AS line;
-          RETURN v_je_id;
-        END;
-        $$ LANGUAGE plpgsql`);
-      await q(`
-        CREATE OR REPLACE FUNCTION fn_post_sale_finance(p_sale_id TEXT, p_created_by INTEGER DEFAULT NULL)
-        RETURNS TEXT AS $$
-        DECLARE
-          v_sale sales%ROWTYPE;
-          v_revenue NUMERIC(14,2);
-          v_cogs NUMERIC(14,2);
-          v_lines JSONB;
-          v_je_id TEXT;
-        BEGIN
-          PERFORM pg_advisory_xact_lock(hashtext('finance:POS:' || p_sale_id));
-          SELECT id INTO v_je_id FROM journal_entries
-          WHERE source = 'POS' AND ref = p_sale_id LIMIT 1;
-          IF v_je_id IS NOT NULL THEN RETURN v_je_id; END IF;
-
-          SELECT * INTO v_sale FROM sales WHERE id = p_sale_id;
-          IF NOT FOUND THEN RAISE EXCEPTION 'Sale % not found.', p_sale_id; END IF;
-          SELECT COALESCE(v_sale.subtotal - v_sale.discount, 0),
-                 COALESCE(SUM(sl.qty * sl.cost_at_sale), 0)
-          INTO v_revenue, v_cogs
-          FROM sale_lines sl WHERE sl.sale_id = p_sale_id;
-
-          v_lines := jsonb_build_array(
-            jsonb_build_object('account_code',
-              CASE WHEN v_sale.payment_method = 'On Account (B2B)' THEN '1200' ELSE '1100' END,
-              'debit', v_sale.total, 'credit', 0),
-            jsonb_build_object('account_code','4100','debit',0,'credit',v_revenue),
-            jsonb_build_object('account_code','2200','debit',0,'credit',COALESCE(v_sale.tax,0)),
-            jsonb_build_object('account_code','1400','debit',v_cogs,'credit',0),
-            jsonb_build_object('account_code','1300','debit',0,'credit',v_cogs)
-          );
-          RETURN fn_post_journal(
-            v_sale.sale_date, 'POS sale ' || v_sale.id, 'POS', v_sale.id, v_lines,
-            COALESCE(p_created_by, v_sale.cashier_id)
-          );
-        END;
-        $$ LANGUAGE plpgsql`);
-      await q(`
-        CREATE OR REPLACE FUNCTION fn_post_grn_finance(p_grn_id TEXT)
-        RETURNS TEXT AS $$
-        DECLARE
-          v_total NUMERIC(14,2);
-          v_vat NUMERIC(14,2);
-          v_date DATE;
-          v_user INTEGER;
-          v_lines JSONB;
-          v_je_id TEXT;
-        BEGIN
-          PERFORM pg_advisory_xact_lock(hashtext('finance:GRN:' || p_grn_id));
-          SELECT id INTO v_je_id FROM journal_entries
-          WHERE source = 'GRN' AND ref = p_grn_id LIMIT 1;
-          IF v_je_id IS NOT NULL THEN RETURN v_je_id; END IF;
-
-          SELECT g.date_received, g.received_by,
-                 COALESCE(SUM(gl.qty * gl.cost), 0),
-                 COALESCE(SUM(gl.qty * gl.cost * COALESCE(t.rate, 0) / 100), 0)
-          INTO v_date, v_user, v_total, v_vat
-          FROM grns g
-          LEFT JOIN grn_lines gl ON gl.grn_id = g.id
-          LEFT JOIN items i ON i.sku = gl.sku
-          LEFT JOIN tax_codes t ON t.code = i.tax_code
-          WHERE g.id = p_grn_id
-          GROUP BY g.id;
-          IF NOT FOUND THEN RAISE EXCEPTION 'GRN % not found.', p_grn_id; END IF;
-          v_lines := jsonb_build_array(
-            jsonb_build_object('account_code','1300','debit',v_total,'credit',0),
-            jsonb_build_object('account_code','2210','debit',v_vat,'credit',0),
-            jsonb_build_object('account_code','2100','debit',0,'credit',v_total + v_vat)
-          );
-          RETURN fn_post_journal(v_date, 'GRN ' || p_grn_id, 'GRN', p_grn_id, v_lines, v_user);
-        END;
-        $$ LANGUAGE plpgsql`);
-      await q(`
-        CREATE OR REPLACE FUNCTION trg_grn_lines_finance()
-        RETURNS TRIGGER AS $$
-        DECLARE v_grn_id TEXT;
-        BEGIN
-          FOR v_grn_id IN SELECT DISTINCT grn_id FROM inserted_grn_lines LOOP
-            PERFORM fn_post_grn_finance(v_grn_id);
-          END LOOP;
-          RETURN NULL;
-        END;
-        $$ LANGUAGE plpgsql`);
-      await q(`
-        CREATE OR REPLACE FUNCTION fn_post_service_finance(p_service_id TEXT)
-        RETURNS TEXT AS $$
-        DECLARE
-          v_date DATE;
-          v_price NUMERIC(14,2);
-          v_je_id TEXT;
-        BEGIN
-          PERFORM pg_advisory_xact_lock(hashtext('finance:SERVICE:' || p_service_id));
-          SELECT id INTO v_je_id FROM journal_entries
-          WHERE source = 'SERVICE' AND ref = p_service_id LIMIT 1;
-          IF v_je_id IS NOT NULL THEN RETURN v_je_id; END IF;
-          SELECT date_in, price INTO v_date, v_price
-          FROM service_tickets WHERE id = p_service_id;
-          IF NOT FOUND THEN RAISE EXCEPTION 'Service ticket % not found.', p_service_id; END IF;
-          IF v_price <= 0 THEN RETURN NULL; END IF;
-          RETURN fn_post_journal(v_date, 'Service ' || p_service_id, 'SERVICE', p_service_id,
-            jsonb_build_array(
-              jsonb_build_object('account_code','1200','debit',v_price,'credit',0),
-              jsonb_build_object('account_code','4200','debit',0,'credit',v_price)
-            ), NULL);
-        END;
-        $$ LANGUAGE plpgsql`);
-      await q(`
-        CREATE OR REPLACE FUNCTION trg_service_finance()
-        RETURNS TRIGGER AS $$
-        BEGIN
-          PERFORM fn_post_service_finance(NEW.id);
-          RETURN NEW;
-        END;
-        $$ LANGUAGE plpgsql`);
-      await q(`
-        CREATE OR REPLACE FUNCTION fn_post_rental_finance(p_rental_id TEXT)
-        RETURNS TEXT AS $$
-        DECLARE
-          v_date DATE;
-          v_amount NUMERIC(14,2);
-          v_je_id TEXT;
-        BEGIN
-          PERFORM pg_advisory_xact_lock(hashtext('finance:RENTAL:' || p_rental_id));
-          SELECT id INTO v_je_id FROM journal_entries
-          WHERE source = 'RENTAL' AND ref = p_rental_id LIMIT 1;
-          IF v_je_id IS NOT NULL THEN RETURN v_je_id; END IF;
-          SELECT date_out, (GREATEST(date_due - date_out, 1) * rate_per_day) + late_fee
-          INTO v_date, v_amount
-          FROM rental_contracts WHERE id = p_rental_id;
-          IF NOT FOUND THEN RAISE EXCEPTION 'Rental contract % not found.', p_rental_id; END IF;
-          IF v_amount <= 0 THEN RETURN NULL; END IF;
-          RETURN fn_post_journal(v_date, 'Rental ' || p_rental_id, 'RENTAL', p_rental_id,
-            jsonb_build_array(
-              jsonb_build_object('account_code','1200','debit',v_amount,'credit',0),
-              jsonb_build_object('account_code','4300','debit',0,'credit',v_amount)
-            ), NULL);
-        END;
-        $$ LANGUAGE plpgsql`);
-      await q(`
-        CREATE OR REPLACE FUNCTION trg_rental_finance()
-        RETURNS TRIGGER AS $$
-        BEGIN
-          PERFORM fn_post_rental_finance(NEW.id);
-          RETURN NEW;
-        END;
-        $$ LANGUAGE plpgsql`);
-      await q(`
-        CREATE OR REPLACE FUNCTION trg_invoice_payment_finance()
-        RETURNS TRIGGER AS $$
-        DECLARE v_amount NUMERIC(14,2);
-        BEGIN
-          v_amount := NEW.amount_paid - OLD.amount_paid;
-          IF v_amount <= 0 THEN RETURN NEW; END IF;
-          PERFORM fn_post_journal(CURRENT_DATE, 'AR receipt ' || NEW.id, 'AR', NEW.id,
-            jsonb_build_array(
-              jsonb_build_object('account_code','1100','debit',v_amount,'credit',0),
-              jsonb_build_object('account_code','1200','debit',0,'credit',v_amount)
-            ), NULL);
-          RETURN NEW;
-        END;
-        $$ LANGUAGE plpgsql`);
-      await q(`
-        CREATE OR REPLACE FUNCTION trg_expense_finance()
-        RETURNS TRIGGER AS $$
-        DECLARE v_account_code TEXT;
-        BEGIN
-          IF NOT NEW.posted THEN RETURN NEW; END IF;
-          SELECT account_code INTO v_account_code
-          FROM expense_categories WHERE code = NEW.category_code;
-          IF v_account_code IS NULL THEN
-            RAISE EXCEPTION 'Expense category % has no ledger account.', NEW.category_code;
-          END IF;
-          PERFORM fn_post_journal(NEW.expense_date, 'Expense ' || NEW.id, 'EXPENSE', NEW.id,
-            jsonb_build_array(
-              jsonb_build_object('account_code',v_account_code,'debit',NEW.amount,'credit',0),
-              jsonb_build_object('account_code','1100','debit',0,'credit',NEW.amount)
-            ), NEW.created_by);
-          RETURN NEW;
-        END;
-        $$ LANGUAGE plpgsql`);
-      await q(`
-        CREATE OR REPLACE FUNCTION trg_shrink_finance()
-        RETURNS TRIGGER AS $$
-        BEGIN
-          IF COALESCE(NEW.value, 0) <= 0 THEN RETURN NEW; END IF;
-          PERFORM fn_post_journal(NEW.incident_date, 'Shrink incident ' || NEW.id, 'SHRINK', NEW.id,
-            jsonb_build_array(
-              jsonb_build_object('account_code','6600','debit',NEW.value,'credit',0),
-              jsonb_build_object('account_code','1300','debit',0,'credit',NEW.value)
-            ), NEW.logged_by);
-          RETURN NEW;
-        END;
-        $$ LANGUAGE plpgsql`);
-      await q(`DROP TRIGGER IF EXISTS trg_sales_finance ON sales`);
-      await q(`DROP TRIGGER IF EXISTS trg_grn_finance ON grns`);
-      await q(`DROP TRIGGER IF EXISTS trg_grn_lines_finance ON grn_lines`);
-      await q(`DROP TRIGGER IF EXISTS trg_service_finance ON service_tickets`);
-      await q(`DROP TRIGGER IF EXISTS trg_rental_finance ON rental_contracts`);
-      await q(`DROP TRIGGER IF EXISTS trg_shrink_finance ON shrink_incidents`);
-      await q(`DROP TRIGGER IF EXISTS trg_invoice_payment_finance ON invoices`);
-      await q(`DROP TRIGGER IF EXISTS trg_expense_finance ON expenses`);
-      await q(`
-        CREATE TRIGGER trg_grn_lines_finance
-        AFTER INSERT ON grn_lines
-        REFERENCING NEW TABLE AS inserted_grn_lines
-        FOR EACH STATEMENT EXECUTE FUNCTION trg_grn_lines_finance()`);
-      await q(`
-        CREATE TRIGGER trg_service_finance
-        AFTER INSERT ON service_tickets
-        FOR EACH ROW EXECUTE FUNCTION trg_service_finance()`);
-      await q(`
-        CREATE TRIGGER trg_rental_finance
-        AFTER INSERT ON rental_contracts
-        FOR EACH ROW EXECUTE FUNCTION trg_rental_finance()`);
-      await q(`
-        CREATE TRIGGER trg_shrink_finance
-        AFTER INSERT ON shrink_incidents
-        FOR EACH ROW EXECUTE FUNCTION trg_shrink_finance()`);
-      await q(`
-        CREATE TRIGGER trg_invoice_payment_finance
-        AFTER UPDATE OF amount_paid ON invoices
-        FOR EACH ROW
-        WHEN (NEW.amount_paid > OLD.amount_paid)
-        EXECUTE FUNCTION trg_invoice_payment_finance()`);
-      await q(`
-        CREATE TRIGGER trg_expense_finance
-        AFTER INSERT ON expenses
-        FOR EACH ROW EXECUTE FUNCTION trg_expense_finance()`);
-      await q(`
-        INSERT INTO expense_categories (code, name, account_code)
-        VALUES
-          ('ELEC', 'Electricity', '6200'),
-          ('RENT', 'Rent', '6100'),
-          ('TRVL', 'Travel', '6300'),
-          ('SUPP', 'Supplies', '6400')
-        ON CONFLICT (code) DO NOTHING`);
-      await q(`
-        INSERT INTO role_permissions (role_key, perm_key, granted)
-        VALUES
-          ('Owner','finance',TRUE),('Owner','finance_edit',TRUE),
-          ('Manager','finance',TRUE),('Manager','finance_edit',TRUE),
-          ('Cashier','finance',FALSE),('Cashier','finance_edit',FALSE),
-          ('Storekeeper','finance',FALSE),('Storekeeper','finance_edit',FALSE),
-          ('Accountant','finance',TRUE),('Accountant','finance_edit',TRUE)
-        ON CONFLICT (role_key, perm_key) DO NOTHING`);
-      const seedClient = await connectDb();
+      const client = await connectDb();
       try {
-        await seedClient.query("BEGIN");
-        await seedClient.query(`SELECT pg_advisory_xact_lock(7319423)`);
-        const { rows: existingJournal } = await seedClient.query(`SELECT 1 FROM journal_entries LIMIT 1`);
-        if (!existingJournal.length) {
-          const { rows: [opening] } = await seedClient.query(`
-          SELECT
-            COALESCE((SELECT SUM(inv.qty * i.cost) FROM inventory inv JOIN items i ON i.sku = inv.sku),0) AS inventory,
-            COALESCE((SELECT SUM(total - amount_paid) FROM invoices
-                      WHERE status NOT IN ('Paid','Cancelled')),0) AS receivables,
-            COALESCE((SELECT SUM(total - amount_paid) FROM (
-              SELECT g.id, g.amount_paid,
-                     ROUND(SUM(gl.qty * gl.cost),2)
-                       + ROUND(SUM(gl.qty * gl.cost * COALESCE(t.rate,0) / 100),2) AS total
+        await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock(7319424)");
+        await financeDatabaseContext.run(client, async () => {
+          await q(`
+            CREATE TABLE IF NOT EXISTS chart_of_accounts (
+              code TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              account_type TEXT NOT NULL CHECK (account_type IN ('Asset','Liability','Equity','Revenue','COGS','Expense')),
+              parent_code TEXT,
+              postable BOOLEAN NOT NULL DEFAULT TRUE,
+              contra BOOLEAN NOT NULL DEFAULT FALSE
+            )`);
+          await q(`
+            INSERT INTO chart_of_accounts (code, name, account_type, parent_code, postable, contra)
+            VALUES
+              ('1100', 'Cash and Cash Equivalents', 'Asset', NULL, TRUE, FALSE),
+              ('1110', 'Bank Current Account', 'Asset', NULL, TRUE, FALSE),
+              ('1200', 'Accounts Receivable', 'Asset', NULL, TRUE, FALSE),
+              ('1300', 'Inventory', 'Asset', NULL, TRUE, FALSE),
+              ('1400', 'Cost of Goods Sold', 'COGS', NULL, TRUE, FALSE),
+              ('1500', 'Fixed Assets', 'Asset', NULL, TRUE, FALSE),
+              ('1510', 'Equipment', 'Asset', '1500', TRUE, FALSE),
+              ('1520', 'Vehicles', 'Asset', '1500', TRUE, FALSE),
+              ('1690', 'Accumulated Depreciation', 'Asset', NULL, TRUE, TRUE),
+              ('2100', 'Accounts Payable', 'Liability', NULL, TRUE, FALSE),
+              ('2200', 'VAT Payable', 'Liability', NULL, TRUE, FALSE),
+              ('2210', 'VAT Receivable', 'Asset', NULL, TRUE, FALSE),
+              ('2300', 'Customer Deposits', 'Liability', NULL, TRUE, FALSE),
+              ('2400', 'Accrued Expenses', 'Liability', NULL, TRUE, FALSE),
+              ('2500', 'Other Tax Payable', 'Liability', NULL, TRUE, FALSE),
+              ('3000', 'Owners Equity', 'Equity', NULL, TRUE, FALSE),
+              ('3100', 'Retained Earnings', 'Equity', NULL, TRUE, FALSE),
+              ('3200', 'Owner Drawings', 'Equity', NULL, TRUE, TRUE),
+              ('4100', 'Sales Revenue', 'Revenue', NULL, TRUE, FALSE),
+              ('4200', 'Service Revenue', 'Revenue', NULL, TRUE, FALSE),
+              ('4300', 'Rental Revenue', 'Revenue', NULL, TRUE, FALSE),
+              ('4400', 'Other Income', 'Revenue', NULL, TRUE, FALSE),
+              ('4900', 'Sales Returns', 'Revenue', NULL, TRUE, TRUE),
+              ('5100', 'Operating Expenses', 'Expense', NULL, TRUE, FALSE),
+              ('6100', 'Rent Expense', 'Expense', NULL, TRUE, FALSE),
+              ('6200', 'Utilities Expense', 'Expense', NULL, TRUE, FALSE),
+              ('6300', 'Travel Expense', 'Expense', NULL, TRUE, FALSE),
+              ('6400', 'Supplies Expense', 'Expense', NULL, TRUE, FALSE),
+              ('6500', 'Depreciation Expense', 'Expense', NULL, TRUE, FALSE),
+              ('6600', 'Shrinkage Expense', 'Expense', NULL, TRUE, FALSE),
+              ('6700', 'Bank Charges', 'Expense', NULL, TRUE, FALSE),
+              ('6800', 'Repairs and Maintenance', 'Expense', NULL, TRUE, FALSE),
+              ('6900', 'Other Expense', 'Expense', NULL, TRUE, FALSE)
+            ON CONFLICT (code) DO NOTHING`);
+          await q(`
+            CREATE TABLE IF NOT EXISTS journal_entries (
+              id TEXT PRIMARY KEY,
+              entry_date DATE NOT NULL,
+              description TEXT NOT NULL,
+              source TEXT NOT NULL,
+              ref TEXT,
+              created_by INTEGER REFERENCES users(id),
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )`);
+          await q(`
+            CREATE TABLE IF NOT EXISTS journal_lines (
+              id SERIAL PRIMARY KEY,
+              je_id TEXT NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+              account_code TEXT NOT NULL REFERENCES chart_of_accounts(code),
+              debit NUMERIC(14,2) NOT NULL DEFAULT 0,
+              credit NUMERIC(14,2) NOT NULL DEFAULT 0
+            )`);
+          await q(`
+            CREATE TABLE IF NOT EXISTS expense_categories (
+              code TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              account_code TEXT NOT NULL DEFAULT '5100' REFERENCES chart_of_accounts(code)
+            )`);
+          await q(`ALTER TABLE expense_categories ADD COLUMN IF NOT EXISTS account_code TEXT REFERENCES chart_of_accounts(code)`);
+          await q(`
+            UPDATE expense_categories
+            SET account_code = CASE code
+              WHEN 'ELEC' THEN '6200'
+              WHEN 'RENT' THEN '6100'
+              WHEN 'TRVL' THEN '6300'
+              WHEN 'SUPP' THEN '6400'
+              ELSE '5100'
+            END
+            WHERE account_code IS NULL`);
+          await q(`ALTER TABLE expense_categories ALTER COLUMN account_code SET DEFAULT '5100'`);
+          await q(`ALTER TABLE expense_categories ALTER COLUMN account_code SET NOT NULL`);
+          await q(`
+            CREATE TABLE IF NOT EXISTS expenses (
+              id TEXT PRIMARY KEY,
+              category_code TEXT REFERENCES expense_categories(code),
+              expense_date DATE NOT NULL,
+              amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+              vendor TEXT,
+              notes TEXT,
+              posted BOOLEAN NOT NULL DEFAULT FALSE,
+              created_by INTEGER REFERENCES users(id),
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )`);
+          await q(`
+            CREATE TABLE IF NOT EXISTS fixed_assets (
+              id SERIAL PRIMARY KEY,
+              code TEXT UNIQUE NOT NULL,
+              name TEXT NOT NULL,
+              cost NUMERIC(14,2) NOT NULL DEFAULT 0,
+              life_years INTEGER NOT NULL DEFAULT 1,
+              salvage NUMERIC(14,2) NOT NULL DEFAULT 0,
+              accumulated_depreciation NUMERIC(14,2) NOT NULL DEFAULT 0,
+              active BOOLEAN NOT NULL DEFAULT TRUE,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )`);
+          await q(`
+            CREATE TABLE IF NOT EXISTS budgets (
+              period TEXT NOT NULL,
+              account_code TEXT NOT NULL REFERENCES chart_of_accounts(code),
+              amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+              PRIMARY KEY (period, account_code)
+            )`);
+          await q(`
+            CREATE TABLE IF NOT EXISTS period_locks (
+              lock_through_date DATE PRIMARY KEY,
+              created_by INTEGER REFERENCES users(id),
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )`);
+          await q(`
+            CREATE TABLE IF NOT EXISTS bank_reconciliations (
+              id SERIAL PRIMARY KEY,
+              je_line_id INTEGER NOT NULL REFERENCES journal_lines(id),
+              reconciled_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              reconciled_by INTEGER REFERENCES users(id),
+              UNIQUE (je_line_id)
+            )`);
+          await q(`CREATE UNIQUE INDEX IF NOT EXISTS uq_bank_reconciliations_line ON bank_reconciliations (je_line_id)`);
+          await q(`ALTER TABLE grns ADD COLUMN IF NOT EXISTS paid BOOLEAN NOT NULL DEFAULT FALSE`);
+          await q(`ALTER TABLE grns ADD COLUMN IF NOT EXISTS amount_paid NUMERIC(14,2) NOT NULL DEFAULT 0`);
+          await q(`
+            INSERT INTO number_series (code, prefix, year, next, pad, descr)
+            VALUES
+              ('JE', 'JE', TO_CHAR(CURRENT_DATE, 'YYYY'), 1, 5, 'Journal Entry'),
+              ('EXP', 'EXP', TO_CHAR(CURRENT_DATE, 'YYYY'), 1, 5, 'Expense Voucher')
+            ON CONFLICT (code) DO NOTHING`);
+          await q(`
+            CREATE OR REPLACE FUNCTION fn_post_journal(
+              p_entry_date DATE,
+              p_description TEXT,
+              p_source TEXT,
+              p_ref TEXT,
+              p_lines JSONB,
+              p_created_by INTEGER
+            ) RETURNS TEXT AS $$
+            DECLARE
+              v_je_id TEXT;
+              v_debit NUMERIC(14,2) := 0;
+              v_credit NUMERIC(14,2) := 0;
+              v_line JSONB;
+            BEGIN
+              IF jsonb_typeof(COALESCE(p_lines, '[]'::jsonb)) <> 'array'
+                 OR jsonb_array_length(COALESCE(p_lines, '[]'::jsonb)) < 2 THEN
+                RAISE EXCEPTION 'Journal entry requires at least two lines.';
+              END IF;
+              PERFORM pg_advisory_xact_lock(7319422);
+              IF EXISTS (SELECT 1 FROM period_locks WHERE lock_through_date >= p_entry_date) THEN
+                RAISE EXCEPTION 'Period is locked for backdated journal entries.' USING HINT = 'Use a date after the latest lock date.';
+              END IF;
+              FOR v_line IN SELECT * FROM jsonb_array_elements(COALESCE(p_lines, '[]'::jsonb)) LOOP
+                IF NOT EXISTS (
+                  SELECT 1 FROM chart_of_accounts
+                  WHERE code = (v_line->>'account_code')::TEXT AND postable
+                ) THEN
+                  RAISE EXCEPTION 'Journal line account % does not exist or is not postable.',
+                    v_line->>'account_code';
+                END IF;
+                IF COALESCE((v_line->>'debit')::NUMERIC, 0) < 0
+                   OR COALESCE((v_line->>'credit')::NUMERIC, 0) < 0
+                   OR (COALESCE((v_line->>'debit')::NUMERIC, 0) > 0
+                       AND COALESCE((v_line->>'credit')::NUMERIC, 0) > 0) THEN
+                  RAISE EXCEPTION 'Journal line amounts must be non-negative and either debit or credit.';
+                END IF;
+                v_debit := v_debit + COALESCE((v_line->>'debit')::NUMERIC, 0);
+                v_credit := v_credit + COALESCE((v_line->>'credit')::NUMERIC, 0);
+              END LOOP;
+              IF v_debit <= 0 OR ABS(v_debit - v_credit) > 0.009 THEN
+                RAISE EXCEPTION 'Journal entry must balance.' USING HINT = 'Debits and credits must match.';
+              END IF;
+              v_je_id := fn_next_number('JE');
+              INSERT INTO journal_entries (id, entry_date, description, source, ref, created_by)
+              VALUES (v_je_id, p_entry_date, p_description, p_source, p_ref, p_created_by);
+              INSERT INTO journal_lines (je_id, account_code, debit, credit)
+              SELECT v_je_id,
+                     (line->>'account_code')::TEXT,
+                     COALESCE((line->>'debit')::NUMERIC, 0),
+                     COALESCE((line->>'credit')::NUMERIC, 0)
+              FROM jsonb_array_elements(COALESCE(p_lines, '[]'::jsonb)) AS line;
+              RETURN v_je_id;
+            END;
+            $$ LANGUAGE plpgsql`);
+          await q(`
+            CREATE OR REPLACE FUNCTION fn_post_sale_finance(p_sale_id TEXT, p_created_by INTEGER DEFAULT NULL)
+            RETURNS TEXT AS $$
+            DECLARE
+              v_sale sales%ROWTYPE;
+              v_revenue NUMERIC(14,2);
+              v_cogs NUMERIC(14,2);
+              v_lines JSONB;
+              v_je_id TEXT;
+            BEGIN
+              PERFORM pg_advisory_xact_lock(hashtext('finance:POS:' || p_sale_id));
+              SELECT id INTO v_je_id FROM journal_entries
+              WHERE source = 'POS' AND ref = p_sale_id LIMIT 1;
+              IF v_je_id IS NOT NULL THEN RETURN v_je_id; END IF;
+
+              SELECT * INTO v_sale FROM sales WHERE id = p_sale_id;
+              IF NOT FOUND THEN RAISE EXCEPTION 'Sale % not found.', p_sale_id; END IF;
+              SELECT COALESCE(v_sale.subtotal - v_sale.discount, 0),
+                     COALESCE(SUM(sl.qty * sl.cost_at_sale), 0)
+              INTO v_revenue, v_cogs
+              FROM sale_lines sl WHERE sl.sale_id = p_sale_id;
+
+              v_lines := jsonb_build_array(
+                jsonb_build_object('account_code',
+                  CASE WHEN v_sale.payment_method = 'On Account (B2B)' THEN '1200' ELSE '1100' END,
+                  'debit', v_sale.total, 'credit', 0),
+                jsonb_build_object('account_code','4100','debit',0,'credit',v_revenue),
+                jsonb_build_object('account_code','2200','debit',0,'credit',COALESCE(v_sale.tax,0)),
+                jsonb_build_object('account_code','1400','debit',v_cogs,'credit',0),
+                jsonb_build_object('account_code','1300','debit',0,'credit',v_cogs)
+              );
+              RETURN fn_post_journal(
+                v_sale.sale_date, 'POS sale ' || v_sale.id, 'POS', v_sale.id, v_lines,
+                COALESCE(p_created_by, v_sale.cashier_id)
+              );
+            END;
+            $$ LANGUAGE plpgsql`);
+          await q(`
+            CREATE OR REPLACE FUNCTION fn_post_grn_finance(p_grn_id TEXT)
+            RETURNS TEXT AS $$
+            DECLARE
+              v_total NUMERIC(14,2);
+              v_vat NUMERIC(14,2);
+              v_date DATE;
+              v_user INTEGER;
+              v_lines JSONB;
+              v_je_id TEXT;
+            BEGIN
+              PERFORM pg_advisory_xact_lock(hashtext('finance:GRN:' || p_grn_id));
+              SELECT id INTO v_je_id FROM journal_entries
+              WHERE source = 'GRN' AND ref = p_grn_id LIMIT 1;
+              IF v_je_id IS NOT NULL THEN RETURN v_je_id; END IF;
+
+              SELECT g.date_received, g.received_by,
+                     COALESCE(SUM(gl.qty * gl.cost), 0),
+                     COALESCE(SUM(gl.qty * gl.cost * COALESCE(t.rate, 0) / 100), 0)
+              INTO v_date, v_user, v_total, v_vat
               FROM grns g
-              JOIN grn_lines gl ON gl.grn_id = g.id
-              JOIN items i ON i.sku = gl.sku
+              LEFT JOIN grn_lines gl ON gl.grn_id = g.id
+              LEFT JOIN items i ON i.sku = gl.sku
               LEFT JOIN tax_codes t ON t.code = i.tax_code
-              WHERE g.paid = FALSE
-              GROUP BY g.id
-            ) payable_balances),0) AS payables,
-            COALESCE((SELECT SUM(cost) FROM fixed_assets WHERE active = TRUE),0) AS fixed_assets,
-            COALESCE((SELECT SUM(accumulated_depreciation) FROM fixed_assets WHERE active = TRUE),0) AS accumulated_depreciation,
-            COALESCE((
-              SELECT MIN(transaction_date)
-              FROM (
-                SELECT sale_date AS transaction_date FROM sales
-                UNION ALL SELECT date_received FROM grns
-                UNION ALL SELECT invoice_date FROM invoices
-                UNION ALL SELECT incident_date FROM shrink_incidents
-              ) transactions
-            ), CURRENT_DATE) - 1 AS entry_date`);
-          const openingLines = [];
-          const addOpeningLine = (account_code, rawAmount, debitNormal) => {
-            const cents = Math.round(Number(rawAmount || 0) * 100);
-            if (!cents) return;
-            const debit = (cents > 0) === debitNormal ? Math.abs(cents) / 100 : 0;
-            const credit = debit ? 0 : Math.abs(cents) / 100;
-            openingLines.push({ account_code, debit, credit });
-          };
-          addOpeningLine("1300", opening.inventory, true);
-          addOpeningLine("1200", opening.receivables, true);
-          addOpeningLine("1500", opening.fixed_assets, true);
-          addOpeningLine("2100", opening.payables, false);
-          addOpeningLine("1690", opening.accumulated_depreciation, false);
-          const netDebitCents = openingLines.reduce((sum, line) =>
-            sum + Math.round((line.debit - line.credit) * 100), 0);
-          if (netDebitCents) {
-            addOpeningLine("3000", netDebitCents / 100, false);
+              WHERE g.id = p_grn_id
+              GROUP BY g.id;
+              IF NOT FOUND THEN RAISE EXCEPTION 'GRN % not found.', p_grn_id; END IF;
+              v_lines := jsonb_build_array(
+                jsonb_build_object('account_code','1300','debit',v_total,'credit',0),
+                jsonb_build_object('account_code','2210','debit',v_vat,'credit',0),
+                jsonb_build_object('account_code','2100','debit',0,'credit',v_total + v_vat)
+              );
+              RETURN fn_post_journal(v_date, 'GRN ' || p_grn_id, 'GRN', p_grn_id, v_lines, v_user);
+            END;
+            $$ LANGUAGE plpgsql`);
+          await q(`
+            CREATE OR REPLACE FUNCTION trg_grn_lines_finance()
+            RETURNS TRIGGER AS $$
+            DECLARE v_grn_id TEXT;
+            BEGIN
+              FOR v_grn_id IN SELECT DISTINCT grn_id FROM inserted_grn_lines LOOP
+                PERFORM fn_post_grn_finance(v_grn_id);
+              END LOOP;
+              RETURN NULL;
+            END;
+            $$ LANGUAGE plpgsql`);
+          await q(`
+            CREATE OR REPLACE FUNCTION fn_post_service_finance(p_service_id TEXT)
+            RETURNS TEXT AS $$
+            DECLARE
+              v_date DATE;
+              v_price NUMERIC(14,2);
+              v_je_id TEXT;
+            BEGIN
+              PERFORM pg_advisory_xact_lock(hashtext('finance:SERVICE:' || p_service_id));
+              SELECT id INTO v_je_id FROM journal_entries
+              WHERE source = 'SERVICE' AND ref = p_service_id LIMIT 1;
+              IF v_je_id IS NOT NULL THEN RETURN v_je_id; END IF;
+              SELECT date_in, price INTO v_date, v_price
+              FROM service_tickets WHERE id = p_service_id;
+              IF NOT FOUND THEN RAISE EXCEPTION 'Service ticket % not found.', p_service_id; END IF;
+              IF v_price <= 0 THEN RETURN NULL; END IF;
+              RETURN fn_post_journal(v_date, 'Service ' || p_service_id, 'SERVICE', p_service_id,
+                jsonb_build_array(
+                  jsonb_build_object('account_code','1200','debit',v_price,'credit',0),
+                  jsonb_build_object('account_code','4200','debit',0,'credit',v_price)
+                ), NULL);
+            END;
+            $$ LANGUAGE plpgsql`);
+          await q(`
+            CREATE OR REPLACE FUNCTION trg_service_finance()
+            RETURNS TRIGGER AS $$
+            BEGIN
+              PERFORM fn_post_service_finance(NEW.id);
+              RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql`);
+          await q(`
+            CREATE OR REPLACE FUNCTION fn_post_rental_finance(p_rental_id TEXT)
+            RETURNS TEXT AS $$
+            DECLARE
+              v_date DATE;
+              v_amount NUMERIC(14,2);
+              v_je_id TEXT;
+            BEGIN
+              PERFORM pg_advisory_xact_lock(hashtext('finance:RENTAL:' || p_rental_id));
+              SELECT id INTO v_je_id FROM journal_entries
+              WHERE source = 'RENTAL' AND ref = p_rental_id LIMIT 1;
+              IF v_je_id IS NOT NULL THEN RETURN v_je_id; END IF;
+              SELECT date_out, (GREATEST(date_due - date_out, 1) * rate_per_day) + late_fee
+              INTO v_date, v_amount
+              FROM rental_contracts WHERE id = p_rental_id;
+              IF NOT FOUND THEN RAISE EXCEPTION 'Rental contract % not found.', p_rental_id; END IF;
+              IF v_amount <= 0 THEN RETURN NULL; END IF;
+              RETURN fn_post_journal(v_date, 'Rental ' || p_rental_id, 'RENTAL', p_rental_id,
+                jsonb_build_array(
+                  jsonb_build_object('account_code','1200','debit',v_amount,'credit',0),
+                  jsonb_build_object('account_code','4300','debit',0,'credit',v_amount)
+                ), NULL);
+            END;
+            $$ LANGUAGE plpgsql`);
+          await q(`
+            CREATE OR REPLACE FUNCTION trg_rental_finance()
+            RETURNS TRIGGER AS $$
+            BEGIN
+              PERFORM fn_post_rental_finance(NEW.id);
+              RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql`);
+          await q(`
+            CREATE OR REPLACE FUNCTION trg_invoice_payment_finance()
+            RETURNS TRIGGER AS $$
+            DECLARE v_amount NUMERIC(14,2);
+            BEGIN
+              v_amount := NEW.amount_paid - OLD.amount_paid;
+              IF v_amount <= 0 THEN RETURN NEW; END IF;
+              PERFORM fn_post_journal(CURRENT_DATE, 'AR receipt ' || NEW.id, 'AR', NEW.id,
+                jsonb_build_array(
+                  jsonb_build_object('account_code','1100','debit',v_amount,'credit',0),
+                  jsonb_build_object('account_code','1200','debit',0,'credit',v_amount)
+                ), NULL);
+              RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql`);
+          await q(`
+            CREATE OR REPLACE FUNCTION trg_expense_finance()
+            RETURNS TRIGGER AS $$
+            DECLARE v_account_code TEXT;
+            BEGIN
+              IF NOT NEW.posted THEN RETURN NEW; END IF;
+              SELECT account_code INTO v_account_code
+              FROM expense_categories WHERE code = NEW.category_code;
+              IF v_account_code IS NULL THEN
+                RAISE EXCEPTION 'Expense category % has no ledger account.', NEW.category_code;
+              END IF;
+              PERFORM fn_post_journal(NEW.expense_date, 'Expense ' || NEW.id, 'EXPENSE', NEW.id,
+                jsonb_build_array(
+                  jsonb_build_object('account_code',v_account_code,'debit',NEW.amount,'credit',0),
+                  jsonb_build_object('account_code','1100','debit',0,'credit',NEW.amount)
+                ), NEW.created_by);
+              RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql`);
+          await q(`
+            CREATE OR REPLACE FUNCTION trg_shrink_finance()
+            RETURNS TRIGGER AS $$
+            BEGIN
+              IF COALESCE(NEW.value, 0) <= 0 THEN RETURN NEW; END IF;
+              PERFORM fn_post_journal(NEW.incident_date, 'Shrink incident ' || NEW.id, 'SHRINK', NEW.id,
+                jsonb_build_array(
+                  jsonb_build_object('account_code','6600','debit',NEW.value,'credit',0),
+                  jsonb_build_object('account_code','1300','debit',0,'credit',NEW.value)
+                ), NEW.logged_by);
+              RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql`);
+          await q(`DROP TRIGGER IF EXISTS trg_sales_finance ON sales`);
+          await q(`DROP TRIGGER IF EXISTS trg_grn_finance ON grns`);
+          await q(`DROP TRIGGER IF EXISTS trg_grn_lines_finance ON grn_lines`);
+          await q(`DROP TRIGGER IF EXISTS trg_service_finance ON service_tickets`);
+          await q(`DROP TRIGGER IF EXISTS trg_rental_finance ON rental_contracts`);
+          await q(`DROP TRIGGER IF EXISTS trg_shrink_finance ON shrink_incidents`);
+          await q(`DROP TRIGGER IF EXISTS trg_invoice_payment_finance ON invoices`);
+          await q(`DROP TRIGGER IF EXISTS trg_expense_finance ON expenses`);
+          await q(`
+            CREATE TRIGGER trg_grn_lines_finance
+            AFTER INSERT ON grn_lines
+            REFERENCING NEW TABLE AS inserted_grn_lines
+            FOR EACH STATEMENT EXECUTE FUNCTION trg_grn_lines_finance()`);
+          await q(`
+            CREATE TRIGGER trg_service_finance
+            AFTER INSERT ON service_tickets
+            FOR EACH ROW EXECUTE FUNCTION trg_service_finance()`);
+          await q(`
+            CREATE TRIGGER trg_rental_finance
+            AFTER INSERT ON rental_contracts
+            FOR EACH ROW EXECUTE FUNCTION trg_rental_finance()`);
+          await q(`
+            CREATE TRIGGER trg_shrink_finance
+            AFTER INSERT ON shrink_incidents
+            FOR EACH ROW EXECUTE FUNCTION trg_shrink_finance()`);
+          await q(`
+            CREATE TRIGGER trg_invoice_payment_finance
+            AFTER UPDATE OF amount_paid ON invoices
+            FOR EACH ROW
+            WHEN (NEW.amount_paid > OLD.amount_paid)
+            EXECUTE FUNCTION trg_invoice_payment_finance()`);
+          await q(`
+            CREATE TRIGGER trg_expense_finance
+            AFTER INSERT ON expenses
+            FOR EACH ROW EXECUTE FUNCTION trg_expense_finance()`);
+          await q(`
+            INSERT INTO expense_categories (code, name, account_code)
+            VALUES
+              ('ELEC', 'Electricity', '6200'),
+              ('RENT', 'Rent', '6100'),
+              ('TRVL', 'Travel', '6300'),
+              ('SUPP', 'Supplies', '6400')
+            ON CONFLICT (code) DO NOTHING`);
+          await q(`
+            INSERT INTO role_permissions (role_key, perm_key, granted)
+            VALUES
+              ('Owner','finance',TRUE),('Owner','finance_edit',TRUE),
+              ('Manager','finance',TRUE),('Manager','finance_edit',TRUE),
+              ('Cashier','finance',FALSE),('Cashier','finance_edit',FALSE),
+              ('Storekeeper','finance',FALSE),('Storekeeper','finance_edit',FALSE),
+              ('Accountant','finance',TRUE),('Accountant','finance_edit',TRUE)
+            ON CONFLICT (role_key, perm_key) DO NOTHING`);
+          const seedClient = financeDatabaseContext.getStore();
+          await seedClient.query(`SELECT pg_advisory_xact_lock(7319423)`);
+          const { rows: existingJournal } = await seedClient.query(`SELECT 1 FROM journal_entries LIMIT 1`);
+          if (!existingJournal.length) {
+            const { rows: [opening] } = await seedClient.query(`
+            SELECT
+              COALESCE((SELECT SUM(inv.qty * i.cost) FROM inventory inv JOIN items i ON i.sku = inv.sku),0) AS inventory,
+              COALESCE((SELECT SUM(total - amount_paid) FROM invoices
+                        WHERE status NOT IN ('Paid','Cancelled')),0) AS receivables,
+              COALESCE((SELECT SUM(total - amount_paid) FROM (
+                SELECT g.id, g.amount_paid,
+                       ROUND(SUM(gl.qty * gl.cost),2)
+                         + ROUND(SUM(gl.qty * gl.cost * COALESCE(t.rate,0) / 100),2) AS total
+                FROM grns g
+                JOIN grn_lines gl ON gl.grn_id = g.id
+                JOIN items i ON i.sku = gl.sku
+                LEFT JOIN tax_codes t ON t.code = i.tax_code
+                WHERE g.paid = FALSE
+                GROUP BY g.id
+              ) payable_balances),0) AS payables,
+              COALESCE((SELECT SUM(cost) FROM fixed_assets WHERE active = TRUE),0) AS fixed_assets,
+              COALESCE((SELECT SUM(accumulated_depreciation) FROM fixed_assets WHERE active = TRUE),0) AS accumulated_depreciation,
+              COALESCE((
+                SELECT MIN(transaction_date)
+                FROM (
+                  SELECT sale_date AS transaction_date FROM sales
+                  UNION ALL SELECT date_received FROM grns
+                  UNION ALL SELECT invoice_date FROM invoices
+                  UNION ALL SELECT incident_date FROM shrink_incidents
+                ) transactions
+              ), CURRENT_DATE) - 1 AS entry_date`);
+            const openingLines = [];
+            const addOpeningLine = (account_code, rawAmount, debitNormal) => {
+              const cents = Math.round(Number(rawAmount || 0) * 100);
+              if (!cents) return;
+              const debit = (cents > 0) === debitNormal ? Math.abs(cents) / 100 : 0;
+              const credit = debit ? 0 : Math.abs(cents) / 100;
+              openingLines.push({ account_code, debit, credit });
+            };
+            addOpeningLine("1300", opening.inventory, true);
+            addOpeningLine("1200", opening.receivables, true);
+            addOpeningLine("1500", opening.fixed_assets, true);
+            addOpeningLine("2100", opening.payables, false);
+            addOpeningLine("1690", opening.accumulated_depreciation, false);
+            const netDebitCents = openingLines.reduce((sum, line) =>
+              sum + Math.round((line.debit - line.credit) * 100), 0);
+            if (netDebitCents) {
+              addOpeningLine("3000", netDebitCents / 100, false);
+            }
+            if (openingLines.length) {
+              await seedClient.query(`
+              SELECT fn_post_journal($1, 'Opening balances', 'OPENING', 'FINANCE-OPENING',
+                $2::jsonb, NULL)`,
+              [opening.entry_date, JSON.stringify(openingLines)]);
+            }
           }
-          if (openingLines.length) {
-            await seedClient.query(`
-            SELECT fn_post_journal($1, 'Opening balances', 'OPENING', 'FINANCE-OPENING',
-              $2::jsonb, NULL)`,
-            [opening.entry_date, JSON.stringify(openingLines)]);
-          }
-        }
-        await seedClient.query("COMMIT");
-      } catch (err) {
-        await seedClient.query("ROLLBACK");
-        throw err;
+        });
+        await client.query("COMMIT");
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
       } finally {
-        seedClient.release();
+        client.release();
       }
     })().catch(error => {
       delete globalThis[financeSchemaKey];
