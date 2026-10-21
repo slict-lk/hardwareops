@@ -41,12 +41,12 @@ export function getDatabaseConfig(env = process.env) {
   }
 
   connectionUrl.searchParams.delete("sslmode");
+  const ca = env.PGSSLROOTCERT_CONTENT?.trim()
+    || (env.PGSSLROOTCERT ? readFileSync(env.PGSSLROOTCERT, "utf8") : undefined);
   const ssl = sslMode === "require"
     ? {
         rejectUnauthorized: true,
-        ...(env.PGSSLROOTCERT
-          ? { ca: readFileSync(env.PGSSLROOTCERT, "utf8") }
-          : {})
+        ...(ca ? { ca } : {})
       }
     : false;
   return {

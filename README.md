@@ -53,6 +53,7 @@ Choose one of these configuration styles:
 | `DATABASE_URL_AIVEN` | Required when `DATABASE_TARGET=aiven` | PostgreSQL URL for Aiven. The app forces SSL on for this target. |
 | `PGSSLMODE` | Optional | SSL mode when `DATABASE_TARGET` is unset: `require` or `disable`. Defaults to the URL's `sslmode` parameter, then `disable`. `DATABASE_TARGET=local` and `DATABASE_TARGET=aiven` override this setting. |
 | `PGSSLROOTCERT` | Optional | Path to the trusted PostgreSQL CA certificate when SSL is enabled and the CA is not in Node.js's default trust store. Certificates are verified by default. |
+| `PGSSLROOTCERT_CONTENT` | Optional | Trusted PostgreSQL CA certificate PEM content. Use this in serverless deployments that cannot provide a certificate file; keep it in protected environment settings. Certificates are verified by default. |
 | `PG_POOL_MAX` | Optional | Maximum PostgreSQL connections in each Node.js process's pool. Defaults to `1`; for Aiven Hobbyist keep it at `1`. This is a per-process/instance limit, not a fleet-wide limit. |
 
 If `DATABASE_TARGET` is not set, `DATABASE_URL` is used. Otherwise the selected
