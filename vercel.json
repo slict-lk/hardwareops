@@ -6,6 +6,9 @@
     },
     "api/finance/[...path].js": {
       "maxConcurrency": 20
+    },
+    "api/finance/ledger/[account].js": {
+      "maxConcurrency": 20
     }
   }
 }
