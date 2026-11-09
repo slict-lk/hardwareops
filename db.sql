@@ -108,12 +108,11 @@ CREATE TABLE users (
 );
 
 INSERT INTO users (name, role_key, init, email) VALUES
- ('Rick Alvarez',   'Owner',       'R', 'rick@store.lk'),
- ('Tina Pham',      'Manager',     'T', 'tina@store.lk'),
- ('Carlos Reyes',   'Cashier',     'C', 'carlos@store.lk'),
- ('Nina Brooks',    'Cashier',     'N', 'nina@store.lk'),
- ('Sunil Perera',   'Storekeeper', 'S', 'sunil@store.lk'),
- ('Amali Fernando', 'Accountant',  'A', 'amali@store.lk');
+ ('Owner',   'Owner',       'R', 'owner@slict.lk'),
+ ('Manager',      'Manager',     'T', 'manager@slict.lk'),
+ ('Cashier',   'Cashier',     'C', 'cashier@slict.lk'),
+ ('Storekeeper',   'Storekeeper', 'S', 'storekeeper@slict.lk'),
+ ('Accountant', 'Accountant',  'A', 'accountant@slict.lk');
 
 CREATE TABLE auth_sessions (
     token_hash TEXT PRIMARY KEY,
