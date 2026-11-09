@@ -194,7 +194,7 @@ The project can be deployed to Vercel as an Express serverless app with a web fr
 
    The API reuses one `pg.Pool` per warm function instance, caps it at `PG_POOL_MAX`, and retires idle connections after 5 seconds. Authentication schema setup is cached once per warm instance. Finance schema setup runs on first finance use and is serialized across instances to avoid concurrent schema changes. For Aiven Hobbyist, use `PG_POOL_MAX=1`: there is no PgBouncer pooler, and the PostgreSQL limit is 25 total connections.
 
-3. No custom build command is required. The Express app serves `index.html` at `/` and handles `/api/*` requests through the API catch-all function, including multi-segment paths such as analytics and finance aging. Do not set `PORT`; Vercel assigns function ports automatically.
+3. No custom build command is required. The Express app serves `index.html` at `/` and handles `/api/*` requests through API catch-all functions, including dedicated nested routes for analytics and finance endpoints. Do not set `PORT`; Vercel assigns function ports automatically.
 4. Once the project is deployed, open the site and sign in with the configured Owner account.
 
 ## Aiven Hobbyist deployment

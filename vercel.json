@@ -4,6 +4,9 @@
     "api/[...path].js": {
       "maxConcurrency": 20
     },
+    "api/analytics/[...path].js": {
+      "maxConcurrency": 20
+    },
     "api/finance/[...path].js": {
       "maxConcurrency": 20
     },
