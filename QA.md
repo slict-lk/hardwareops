@@ -116,7 +116,7 @@ server-side access control.
 | Owner | All panels; user management; permission editing | [ ] Can access approved screens and manage users/permissions |
 | Manager | All operational panels except user management/permission editing | [ ] Confirm user and permission APIs deny where policy requires |
 | Cashier | POS, Services, Rentals | [ ] Finance and inventory routes deny access |
-| Storekeeper | Dashboard, Inventory, PO, GRN, Rentals, Shrink, Masters | [ ] Finance and POS routes deny access |
+| Storekeeper | Dashboard, Inventory, Stock Adjustments, PO, GRN, Rentals, Shrink, Masters | [ ] Finance and POS routes deny access |
 | Accountant | Dashboard, B2B, GMROI, Analytics, Number Series, Finance | [ ] Verify whether Finance editing is intended; currently granted |
 
 - [ ] Verify the visible nav matches the seeded permission matrix.
@@ -162,7 +162,9 @@ server-side access control.
 
 ### Inventory and Masters
 
-- [ ] Load and search items; compare displayed quantity/cost/price to the DB.
+- [ ] Load items and search by SKU, name, category, brand, UOM, tax, supplier,
+  location, quantity, reorder point, cost, price, and last-sold date from both
+  Inventory and Master Data > Items; confirm category/status filters still work.
 - [ ] Create and edit an item with valid category, UOM, tax, supplier, and
   location values.
 - [ ] Verify invalid references and malformed values return a clear error.
@@ -171,6 +173,15 @@ server-side access control.
 - [ ] Verify create/edit/delete permissions through direct API requests.
 - [ ] Verify UOM factors and display precision are not silently changed by UI
   formatting.
+- [ ] Post a stock increase and decrease as an authorized inventory role;
+  verify the adjustment history and inventory quantity change exactly once.
+- [ ] Verify a cost-valued decrease posts debit 6600 / credit 1300, and a
+  cost-valued increase posts debit 1300 / credit 4400, with the adjustment ID
+  as the journal reference.
+- [ ] Verify a zero-cost adjustment does not create a zero-value journal entry,
+  and a failure to post Finance rolls back the adjustment and stock update.
+- [ ] Reject invalid quantities, unrecognized reasons, unauthorized posts, and
+  decreases that would take stock below zero without changing inventory.
 - [ ] Verify all 12 master tabs render: Suppliers, Categories, Items,
   Customers, UOM, Tax Codes, Locations, Price Tiers, Brands, Payment Terms,
   Number Series, Users & Roles.
@@ -180,7 +191,10 @@ server-side access control.
 - [ ] Create a PO with multiple valid item lines and confirm its identifier
   comes from the PO number series.
 - [ ] Confirm expected date reflects supplier lead days.
+- [ ] Open each PO's SKU Detail and verify every line's SKU, item, UOM,
+  quantity, unit cost, and line total.
 - [ ] Receive the PO and verify GRN ID, supplier, lines, and receipt date.
+- [ ] Open the GRN's SKU Detail and verify the received line information.
 - [ ] Verify PO becomes `Received` and each line increases inventory once.
 - [ ] Verify a multi-line GRN produces one balanced `GRN` journal for the
   complete receipt.

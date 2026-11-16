@@ -14,6 +14,7 @@ DROP TABLE IF EXISTS expense_categories CASCADE;
 DROP TABLE IF EXISTS journal_lines CASCADE;
 DROP TABLE IF EXISTS journal_entries CASCADE;
 DROP TABLE IF EXISTS chart_of_accounts CASCADE;
+DROP TABLE IF EXISTS stock_adjustments CASCADE;
 DROP TABLE IF EXISTS shrink_incidents CASCADE;
 DROP TABLE IF EXISTS rental_contracts CASCADE;
 DROP TABLE IF EXISTS service_tickets CASCADE;
@@ -69,27 +70,27 @@ CREATE TABLE role_permissions (
 INSERT INTO role_permissions (role_key, perm_key, granted) VALUES
  ('Owner','dashboard',TRUE),('Owner','pos',TRUE),('Owner','inventory',TRUE),('Owner','po',TRUE),
  ('Owner','grn',TRUE),('Owner','services',TRUE),('Owner','rentals',TRUE),('Owner','b2b',TRUE),
- ('Owner','shrink',TRUE),('Owner','gmroi',TRUE),('Owner','analytics',TRUE),('Owner','masters',TRUE),
+ ('Owner','shrink',TRUE),('Owner','adjustments',TRUE),('Owner','gmroi',TRUE),('Owner','analytics',TRUE),('Owner','masters',TRUE),
  ('Owner','masters_edit',TRUE),('Owner','numberseries',TRUE),('Owner','users_manage',TRUE),
  ('Owner','finance',TRUE),('Owner','finance_edit',TRUE),
  ('Manager','dashboard',TRUE),('Manager','pos',TRUE),('Manager','inventory',TRUE),('Manager','po',TRUE),
  ('Manager','grn',TRUE),('Manager','services',TRUE),('Manager','rentals',TRUE),('Manager','b2b',TRUE),
- ('Manager','shrink',TRUE),('Manager','gmroi',TRUE),('Manager','analytics',TRUE),('Manager','masters',TRUE),
+ ('Manager','shrink',TRUE),('Manager','adjustments',TRUE),('Manager','gmroi',TRUE),('Manager','analytics',TRUE),('Manager','masters',TRUE),
  ('Manager','masters_edit',TRUE),('Manager','numberseries',TRUE),('Manager','users_manage',FALSE),
  ('Manager','finance',TRUE),('Manager','finance_edit',TRUE),
  ('Cashier','dashboard',FALSE),('Cashier','pos',TRUE),('Cashier','inventory',FALSE),('Cashier','po',FALSE),
  ('Cashier','grn',FALSE),('Cashier','services',TRUE),('Cashier','rentals',TRUE),('Cashier','b2b',FALSE),
- ('Cashier','shrink',FALSE),('Cashier','gmroi',FALSE),('Cashier','analytics',FALSE),('Cashier','masters',FALSE),
+ ('Cashier','shrink',FALSE),('Cashier','adjustments',FALSE),('Cashier','gmroi',FALSE),('Cashier','analytics',FALSE),('Cashier','masters',FALSE),
  ('Cashier','masters_edit',FALSE),('Cashier','numberseries',FALSE),('Cashier','users_manage',FALSE),
  ('Cashier','finance',FALSE),('Cashier','finance_edit',FALSE),
  ('Storekeeper','dashboard',TRUE),('Storekeeper','pos',FALSE),('Storekeeper','inventory',TRUE),('Storekeeper','po',TRUE),
  ('Storekeeper','grn',TRUE),('Storekeeper','services',FALSE),('Storekeeper','rentals',TRUE),('Storekeeper','b2b',FALSE),
- ('Storekeeper','shrink',TRUE),('Storekeeper','gmroi',FALSE),('Storekeeper','analytics',FALSE),('Storekeeper','masters',TRUE),
+ ('Storekeeper','shrink',TRUE),('Storekeeper','adjustments',TRUE),('Storekeeper','gmroi',FALSE),('Storekeeper','analytics',FALSE),('Storekeeper','masters',TRUE),
  ('Storekeeper','masters_edit',TRUE),('Storekeeper','numberseries',FALSE),('Storekeeper','users_manage',FALSE),
  ('Storekeeper','finance',FALSE),('Storekeeper','finance_edit',FALSE),
  ('Accountant','dashboard',TRUE),('Accountant','pos',FALSE),('Accountant','inventory',FALSE),('Accountant','po',FALSE),
  ('Accountant','grn',FALSE),('Accountant','services',FALSE),('Accountant','rentals',FALSE),('Accountant','b2b',TRUE),
- ('Accountant','shrink',FALSE),('Accountant','gmroi',TRUE),('Accountant','analytics',TRUE),('Accountant','masters',FALSE),
+ ('Accountant','shrink',FALSE),('Accountant','adjustments',FALSE),('Accountant','gmroi',TRUE),('Accountant','analytics',TRUE),('Accountant','masters',FALSE),
  ('Accountant','masters_edit',FALSE),('Accountant','numberseries',TRUE),('Accountant','users_manage',FALSE),
  ('Accountant','finance',TRUE),('Accountant','finance_edit',FALSE);
 
@@ -140,6 +141,7 @@ INSERT INTO number_series VALUES
  ('SRV','SRV','2026',1005,4,'Service Ticket'),
  ('RNT','RNT','2026',5003,4,'Rental Contract'),
  ('SHR','SHR','2026',4,4,'Shrink Incident'),
+ ('ADJ','ADJ','2026',1,4,'Stock Adjustment'),
  ('QUO','QUO','2026',1,4,'Quotation'),
  ('JE','JE','2026',1001,5,'Journal Entry'),
  ('EXP','EXP','2026',2001,5,'Expense Voucher');
@@ -500,6 +502,21 @@ CREATE TABLE shrink_incidents (
     department TEXT,
     value NUMERIC(14,2) NOT NULL DEFAULT 0,
     logged_by INTEGER REFERENCES users(id),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE stock_adjustments (
+    id TEXT PRIMARY KEY,
+    adjustment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    sku TEXT NOT NULL REFERENCES items(sku),
+    direction TEXT NOT NULL CHECK (direction IN ('Increase','Decrease')),
+    qty NUMERIC(14,3) NOT NULL CHECK (qty > 0),
+    reason TEXT NOT NULL CHECK (reason IN ('Stock Count','Damage','Expired','Found Stock','Other')),
+    notes TEXT,
+    before_qty NUMERIC(14,3) NOT NULL,
+    after_qty NUMERIC(14,3) NOT NULL CHECK (after_qty >= 0),
+    value NUMERIC(14,2) NOT NULL DEFAULT 0,
+    adjusted_by INTEGER REFERENCES users(id),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

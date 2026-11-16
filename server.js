@@ -15,6 +15,7 @@ const indexFile = fileURLToPath(new URL("./index.html", import.meta.url));
 const poolKey = Symbol.for("hardwareops.postgresPool");
 const authSchemaKey = Symbol.for("hardwareops.authSchemaInitialization");
 const financeSchemaKey = Symbol.for("hardwareops.financeSchemaInitialization");
+const stockAdjustmentsSchemaKey = Symbol.for("hardwareops.stockAdjustmentsSchemaInitialization");
 const requestContext = new AsyncLocalStorage();
 const financeDatabaseContext = new AsyncLocalStorage();
 app.use(cors());
@@ -91,9 +92,9 @@ function handleDatabaseBusy(error, req, res, source) {
 }
 
 app.use("/api", (req, res, next) => {
-  ensureAuthSchema().then(() => next()).catch(error => {
-    if (handleDatabaseBusy(error, req, res, "initializeAuthSchema")) return;
-    console.error("Failed to initialize HardwareOps authentication schema:", error);
+  ensureAuthSchema().then(() => initializeStockAdjustmentsSchema()).then(() => next()).catch(error => {
+    if (handleDatabaseBusy(error, req, res, "initializeApiSchema")) return;
+    console.error("Failed to initialize HardwareOps API schema:", error);
     res.status(500).json({ error: "The API could not connect to its database." });
   });
 });
@@ -2007,6 +2008,113 @@ app.post("/api/rentals", requirePermission("rentals"), wrap(async (req, res) => 
   res.status(201).json({ id });
 }));
 
+app.get("/api/stock-adjustments", requirePermission("adjustments"), wrap(async (_req, res) => {
+  const { rows } = await q(`
+    SELECT sa.id, sa.adjustment_date AS date, sa.sku, i.name AS item,
+           i.uom_code AS uom, sa.direction, sa.qty, sa.reason, sa.notes,
+           sa.before_qty, sa.after_qty, sa.value, u.name AS adjusted_by
+    FROM stock_adjustments sa
+    JOIN items i ON i.sku = sa.sku
+    LEFT JOIN users u ON u.id = sa.adjusted_by
+    ORDER BY sa.adjustment_date DESC, sa.created_at DESC, sa.id DESC`);
+  res.json(rows);
+}));
+
+app.post("/api/stock-adjustments", requirePermission("adjustments"), wrap(async (req, res) => {
+  const sku = typeof req.body?.sku === "string" ? req.body.sku.trim() : "";
+  const direction = req.body?.direction;
+  const qty = Number(req.body?.qty);
+  const reason = req.body?.reason;
+  const notes = typeof req.body?.notes === "string" ? req.body.notes.trim() : "";
+  const validReasons = ["Stock Count", "Damage", "Expired", "Found Stock", "Other"];
+  if (!sku || !["Increase", "Decrease"].includes(direction)
+      || !Number.isFinite(qty) || qty <= 0 || qty > 99999999999.999
+      || Number(qty.toFixed(3)) !== qty || !validReasons.includes(reason)
+      || notes.length > 500) {
+    return res.status(400).json({
+      error: "Provide an item, adjustment direction, quantity to three decimal places, valid reason, and notes under 500 characters."
+    });
+  }
+
+  await initializeFinanceSchema();
+  const client = await connectDb();
+  let transactionStarted = false;
+  try {
+    await client.query("BEGIN");
+    transactionStarted = true;
+    const { rows: inventoryRows } = await client.query(`
+      SELECT inv.qty, i.cost
+      FROM inventory inv
+      JOIN items i ON i.sku = inv.sku
+      WHERE inv.sku = $1
+      FOR UPDATE OF inv`,
+    [sku]);
+    if (!inventoryRows.length) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+      return res.status(404).json({ error: "The selected item was not found in inventory." });
+    }
+
+    const beforeMilli = Math.round(Number(inventoryRows[0].qty) * 1000);
+    const adjustmentMilli = Math.round(qty * 1000);
+    const afterMilli = beforeMilli + (direction === "Increase" ? adjustmentMilli : -adjustmentMilli);
+    if (afterMilli < 0) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+      return res.status(422).json({ error: "An adjustment cannot reduce stock below zero." });
+    }
+    if (afterMilli > 99999999999999) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+      return res.status(422).json({ error: "The adjustment would exceed the supported quantity range." });
+    }
+    const beforeQty = beforeMilli / 1000;
+    const afterQty = afterMilli / 1000;
+    const value = Number((Number(inventoryRows[0].cost) * qty).toFixed(2));
+    if (!Number.isFinite(value) || value > 999999999999.99) {
+      await client.query("ROLLBACK");
+      transactionStarted = false;
+      return res.status(422).json({ error: "The adjustment value exceeds the supported range." });
+    }
+    const { rows: [{ id }] } = await client.query(`SELECT fn_next_number('ADJ') AS id`);
+    await client.query(`
+      INSERT INTO stock_adjustments
+        (id, sku, direction, qty, reason, notes, before_qty, after_qty, value, adjusted_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [id, sku, direction, qty, reason, notes || null, beforeQty, afterQty, value, req.user.id]);
+    await client.query(`
+      UPDATE inventory SET qty = $1, updated_at = NOW()
+      WHERE sku = $2`,
+    [afterQty, sku]);
+    let journalId = null;
+    if (value > 0) {
+      const lines = [
+        { account_code: direction === "Decrease" ? "6600" : "1300",
+          debit: value, credit: 0 },
+        { account_code: direction === "Decrease" ? "1300" : "4400",
+          debit: 0, credit: value }
+      ];
+      const { rows: [{ journal_id }] } = await client.query(`
+        SELECT fn_post_journal(
+          CURRENT_DATE, $1, 'STOCK_ADJUSTMENT', $2, $3::jsonb, $4
+        ) AS journal_id`,
+      [`Stock adjustment ${id} (${direction.toLowerCase()}: ${reason})`, id,
+        JSON.stringify(lines), req.user.id]);
+      journalId = journal_id;
+    }
+    await client.query("COMMIT");
+    transactionStarted = false;
+    res.status(201).json({
+      id, before_qty: beforeQty, after_qty: afterQty, journal_id: journalId
+    });
+  } catch (err) {
+    if (transactionStarted) await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}));
+
 app.get("/api/shrink", wrap(async (_req,res)=>{
   const { rows } = await q(`
     SELECT si.id, si.incident_date AS date, si.sku, i.name AS item, si.qty,
@@ -2060,6 +2168,45 @@ export function initializeAuthSchema() {
     })();
   }
   return globalThis[authSchemaKey];
+}
+
+function initializeStockAdjustmentsSchema() {
+  if (!globalThis[stockAdjustmentsSchemaKey]) {
+    globalThis[stockAdjustmentsSchemaKey] = (async () => {
+      await q(`
+        CREATE TABLE IF NOT EXISTS stock_adjustments (
+          id TEXT PRIMARY KEY,
+          adjustment_date DATE NOT NULL DEFAULT CURRENT_DATE,
+          sku TEXT NOT NULL REFERENCES items(sku),
+          direction TEXT NOT NULL CHECK (direction IN ('Increase','Decrease')),
+          qty NUMERIC(14,3) NOT NULL CHECK (qty > 0),
+          reason TEXT NOT NULL CHECK (reason IN ('Stock Count','Damage','Expired','Found Stock','Other')),
+          notes TEXT,
+          before_qty NUMERIC(14,3) NOT NULL,
+          after_qty NUMERIC(14,3) NOT NULL CHECK (after_qty >= 0),
+          value NUMERIC(14,2) NOT NULL DEFAULT 0,
+          adjusted_by INTEGER REFERENCES users(id),
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        )`);
+      await q(`
+        INSERT INTO number_series (code, prefix, year, next, pad, descr)
+        VALUES ('ADJ','ADJ',EXTRACT(YEAR FROM CURRENT_DATE)::TEXT,1,4,'Stock Adjustment')
+        ON CONFLICT (code) DO NOTHING`);
+      await q(`
+        INSERT INTO role_permissions (role_key, perm_key, granted)
+        VALUES
+          ('Owner','adjustments',TRUE),
+          ('Manager','adjustments',TRUE),
+          ('Cashier','adjustments',FALSE),
+          ('Storekeeper','adjustments',TRUE),
+          ('Accountant','adjustments',FALSE)
+        ON CONFLICT (role_key, perm_key) DO NOTHING`);
+    })().catch(error => {
+      globalThis[stockAdjustmentsSchemaKey] = null;
+      throw error;
+    });
+  }
+  return globalThis[stockAdjustmentsSchemaKey];
 }
 
 export function initializeFinanceSchema() {

@@ -473,6 +473,7 @@
   <button data-panel="dashboard">Dashboard</button>
   <button data-panel="pos">POS</button>
   <button data-panel="inventory">Inventory</button>
+  <button data-panel="adjustments">Stock Adjustments</button>
   <button data-panel="po">Purchase Orders</button>
   <button data-panel="grn">GRN</button>
   <button data-panel="services">Services</button>
@@ -553,7 +554,7 @@
     <h2>Inventory</h2>
     <p class="sub">Item master with UOM, brand, tax, location.</p>
     <div class="toolbar">
-      <input id="invSearch" placeholder="Search SKU or item name...">
+      <input id="invSearch" placeholder="Search any item field...">
       <select id="invCat"><option value="">All Categories</option></select>
       <select id="invStatus">
         <option value="">All Status</option>
@@ -563,6 +564,47 @@
       </select>
     </div>
     <div id="invTable"></div>
+  </section>
+
+  <section class="panel" id="adjustments">
+    <h2>Stock Adjustments</h2>
+    <p class="sub">Record verified stock increases or decreases. Cost-valued adjustments post to Finance: decreases to Shrinkage Expense and increases to Other Income.</p>
+    <div class="form-row">
+      <label>Item
+        <div class="searchable-select">
+          <input id="adjustmentSKUSearch" type="text" placeholder="Search SKU or item..." autocomplete="off"
+            role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="adjustmentSKUOptions">
+          <select id="adjustmentSKU" hidden></select>
+          <div class="searchable-options" id="adjustmentSKUOptions" role="listbox" hidden></div>
+        </div>
+      </label>
+      <label>Adjustment
+        <select id="adjustmentDirection">
+          <option>Decrease</option>
+          <option>Increase</option>
+        </select>
+      </label>
+      <label>Quantity
+        <input type="number" id="adjustmentQty" value="1" min="0.001" step="0.001">
+      </label>
+      <label>Reason
+        <select id="adjustmentReason">
+          <option>Stock Count</option>
+          <option>Damage</option>
+          <option>Expired</option>
+          <option>Found Stock</option>
+          <option>Other</option>
+        </select>
+      </label>
+      <label>Notes
+        <input type="text" id="adjustmentNotes" maxlength="500" placeholder="Optional details">
+      </label>
+      <label>&nbsp;
+        <button class="btn" id="adjustmentPost">Post Adjustment</button>
+      </label>
+    </div>
+    <div class="grid" id="adjustmentKpis"></div>
+    <div id="adjustmentTable"></div>
   </section>
 
   <section class="panel" id="po">
@@ -789,6 +831,9 @@
         <label>Reorder Pt<input type="number" id="itmReorder" value="10"></label>
         <label>Location<select id="itmLocation"></select></label>
         <label>&nbsp;<button class="btn" id="itmAdd">+ Add Item</button></label>
+      </div>
+      <div class="toolbar">
+        <input id="itmSearch" type="search" placeholder="Search any item field (SKU, name, category, brand, UOM, tax, supplier, stock, price...)">
       </div>
       <div id="itmTable"></div>
     </div>
@@ -1036,7 +1081,7 @@ let ROLES = {
 };
 
 const PERMISSION_KEYS = [
-  "dashboard", "pos", "inventory", "po", "grn",
+  "dashboard", "pos", "inventory", "adjustments", "po", "grn",
   "services", "rentals", "b2b", "shrink", "gmroi", "analytics", "finance",
   "masters", "masters_edit", "numberseries", "users_manage", "finance_edit"
 ];
@@ -1057,6 +1102,7 @@ let customers = [];
 let services = [];
 let rentals = [];
 let shrink = [];
+let stockAdjustments = [];
 let invoices = [];
 let purchaseOrders = [];
 let grns = [];
@@ -1498,11 +1544,13 @@ async function bootstrap() {
   invoices            = invs;
   purchaseOrders      = pos.map(p => ({ ...p, lines: p.lines || [] }));
   grns                = grnList.map(g => ({ ...g, lines: g.lines || [] }));
+  stockAdjustments    = adjustments;
 
   try { posSales = await api("/api/sales"); } catch { posSales = []; }
 
   currentUserId = authenticatedUser.id;
   if (can("users_manage")) users = await api("/api/users?includeInactive=true");
+  stockAdjustments = can("adjustments") ? await api("/api/stock-adjustments") : [];
 
   wireNav();
   wireFinanceTabs();
@@ -1555,6 +1603,7 @@ function renderAll() {
   renderRentals();
   renderB2B();
   renderShrink();
+  renderStockAdjustments();
   renderGMROI();
   renderSuppliers();
   renderCategories();
@@ -2372,6 +2421,20 @@ $("posCheckout").addEventListener("click", async () => {
 /* ============================================================
    INVENTORY
    ============================================================ */
+function matchesItemSearch(item, query) {
+  const terms = String(query || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return true;
+
+  const values = [
+    item.sku, item.name, item.cat, getCategory(item.cat)?.name,
+    item.brand, getBrand(item.brand)?.name, item.uom, item.tax,
+    item.location, item.supplier_id, item.supplier, item.qty, item.reorder,
+    item.cost, item.price, item.last_sold
+  ].map(value => String(value ?? "").toLowerCase());
+
+  return terms.every(term => values.some(value => value.includes(term)));
+}
+
 function renderInventory() {
   const catSel = $("invCat");
   if (catSel.options.length === 1) {
@@ -2379,11 +2442,11 @@ function renderInventory() {
       const o = document.createElement("option"); o.value = c.code; o.textContent = c.name; catSel.appendChild(o);
     });
   }
-  const q = $("invSearch").value.toLowerCase();
+  const q = $("invSearch").value;
   const cat = $("invCat").value;
   const status = $("invStatus").value;
   const rows = inventory.filter(i => {
-    if (q && !(i.sku.toLowerCase().includes(q) || i.name.toLowerCase().includes(q))) return false;
+    if (!matchesItemSearch(i, q)) return false;
     if (cat && i.cat !== cat) return false;
     if (status === "reorder" && !lowFlag(i)) return false;
     if (status === "dead" && !deadFlag(i)) return false;
@@ -2518,6 +2581,49 @@ function setupSearchableSelect(searchId, selectId, optionsId) {
   searchEl.dataset.bound = "1";
 }
 
+function showSkuDetail(documentType, documentId, context, lines) {
+  let dialog = $("skuDetailDialog");
+  if (!dialog) {
+    dialog = document.createElement("dialog");
+    dialog.id = "skuDetailDialog";
+    dialog.style.cssText = "width:min(760px,92vw);max-height:85vh;overflow:auto;padding:24px;border:1px solid var(--border);border-radius:10px;background:var(--gray);color:var(--light)";
+    document.body.appendChild(dialog);
+  }
+
+  dialog.replaceChildren();
+  const heading = document.createElement("h2");
+  heading.textContent = `SKU Detail — ${documentType} ${documentId}`;
+  heading.style.marginTop = "0";
+  const description = document.createElement("p");
+  description.textContent = context;
+  description.style.cssText = "color:var(--muted);margin:0 0 16px";
+
+  const detailTable = document.createElement("div");
+  detailTable.innerHTML = table([
+    ["SKU","Item","UOM","Qty","Unit Cost","Line Total"],
+    ...lines.map(line => {
+      const item = inventory.find(row => row.sku === line.sku);
+      return [
+        `<code>${finEsc(line.sku)}</code>`,
+        finEsc(item?.name || "—"),
+        finEsc(item?.uom || "—"),
+        finEsc(line.qty),
+        money(line.cost),
+        money(Number(line.qty) * Number(line.cost))
+      ];
+    })
+  ]);
+
+  const closeButton = document.createElement("button");
+  closeButton.type = "button";
+  closeButton.className = "btn";
+  closeButton.textContent = "Close";
+  closeButton.style.marginTop = "16px";
+  closeButton.addEventListener("click", () => dialog.close());
+  dialog.append(heading, description, detailTable, closeButton);
+  dialog.showModal();
+}
+
 function renderPO() {
   const supSel = $("poSupplier");
   const selectedSupplier = supSel.value;
@@ -2596,16 +2702,29 @@ function renderPO() {
   if ($("poClearDraft")) { $("poClearDraft").onclick = () => { draftPO = []; renderPO(); }; }
 
   $("poTable").innerHTML = purchaseOrders.length ? table([
-    ["PO #","Supplier","Date","Expected","Lines","Total","Status","Action"],
+    ["PO #","Supplier","Date","Expected","SKU Detail","Total","Status","Action"],
     ...purchaseOrders.map(p => {
       const total = p.lines.reduce((s, l) => s + Number(l.qty) * Number(l.cost), 0);
       const badge = {Draft:"warn",Sent:"blue",Partial:"info",Received:"ok",Cancelled:"bad"}[p.status] || "info";
       const action = p.status === "Received" ? `<span style="color:var(--muted-soft);font-size:12px;">Closed</span>`
         : `<button class="btn small" data-receive="${p.id}">Receive →</button>`;
-      return [`<code>${p.id}</code>`, p.supplier, p.date, p.expected || "—", p.lines.length, money(total), `<span class="badge ${badge}">${p.status}</span>`, action];
+      return [`<code>${p.id}</code>`, finEsc(p.supplier), finEsc(p.date), finEsc(p.expected || "—"),
+        `<button class="btn secondary small" type="button" data-po-sku-detail="${finEsc(p.id)}">SKU Detail (${p.lines.length})</button>`,
+        money(total), `<span class="badge ${badge}">${finEsc(p.status)}</span>`, action];
     })
   ]) : "<p style='color:var(--muted);font-size:13px;'>No POs.</p>";
   addTableActions($("poTable"), "purchase-orders");
+
+  $("poTable").querySelectorAll("[data-po-sku-detail]").forEach(button => {
+    button.addEventListener("click", () => {
+      const po = purchaseOrders.find(record => String(record.id) === button.dataset.poSkuDetail);
+      if (!po) {
+        toast("Purchase order was not found. Refresh and try again.", "err");
+        return;
+      }
+      showSkuDetail("PO", po.id, `${po.supplier} · ${po.date}`, po.lines);
+    });
+  });
 
   document.querySelectorAll("[data-receive]").forEach(el => {
     el.onclick = () => {
@@ -2686,13 +2805,26 @@ function renderGRN() {
   }
 
   $("grnTable").innerHTML = grns.length ? table([
-    ["GRN #","PO #","Supplier","Received","Lines","Value","Received By","Notes"],
+    ["GRN #","PO #","Supplier","Received","SKU Detail","Value","Received By","Notes"],
     ...grns.map(g => {
       const val = g.lines.reduce((s, l) => s + Number(l.qty) * Number(l.cost), 0);
-      return [`<code>${g.id}</code>`, `<code>${g.poId}</code>`, g.supplier, g.dateReceived, g.lines.length, money(val), g.receivedBy || "—", g.notes || "—"];
+      return [`<code>${finEsc(g.id)}</code>`, `<code>${finEsc(g.poId)}</code>`, finEsc(g.supplier),
+        finEsc(g.dateReceived),
+        `<button class="btn secondary small" type="button" data-grn-sku-detail="${finEsc(g.id)}">SKU Detail (${g.lines.length})</button>`,
+        money(val), finEsc(g.receivedBy || "—"), finEsc(g.notes || "—")];
     })
   ]) : "<p style='color:var(--muted);font-size:13px;'>No GRNs.</p>";
   addTableActions($("grnTable"), "goods-received-notes");
+  $("grnTable").querySelectorAll("[data-grn-sku-detail]").forEach(button => {
+    button.addEventListener("click", () => {
+      const grn = grns.find(record => String(record.id) === button.dataset.grnSkuDetail);
+      if (!grn) {
+        toast("GRN was not found. Refresh and try again.", "err");
+        return;
+      }
+      showSkuDetail("GRN", grn.id, `PO ${grn.poId} · ${grn.supplier} · ${grn.dateReceived}`, grn.lines);
+    });
+  });
 }
 
 /* ============================================================
@@ -2813,6 +2945,80 @@ function renderShrink() {
   ]) : "";
   addTableActions($("shrinkTable"), "shrinkage");
 }
+
+function renderStockAdjustments() {
+  const sel = $("adjustmentSKU");
+  const selectedSku = sel.value;
+  sel.innerHTML = inventory.map(i =>
+    `<option value="${finEsc(i.sku)}">${finEsc(i.sku)} — ${finEsc(i.name)}</option>`
+  ).join("");
+  if (Array.from(sel.options).some(option => option.value === selectedSku)) {
+    sel.value = selectedSku;
+  }
+  setupSearchableSelect("adjustmentSKUSearch", "adjustmentSKU", "adjustmentSKUOptions");
+
+  const increases = stockAdjustments.filter(row => row.direction === "Increase");
+  const decreases = stockAdjustments.filter(row => row.direction === "Decrease");
+  $("adjustmentKpis").innerHTML = `
+    <div class="kpi"><div class="label">Adjustments</div><div class="value">${stockAdjustments.length}</div><div class="meta">Posted records</div></div>
+    <div class="kpi"><div class="label">Stock Added</div><div class="value green">${increases.reduce((sum, row) => sum + Number(row.qty), 0).toLocaleString("en-LK")}</div><div class="meta">${increases.length} increases</div></div>
+    <div class="kpi"><div class="label">Stock Removed</div><div class="value red">${decreases.reduce((sum, row) => sum + Number(row.qty), 0).toLocaleString("en-LK")}</div><div class="meta">${decreases.length} decreases</div></div>
+  `;
+  $("adjustmentTable").innerHTML = stockAdjustments.length ? table([
+    ["Adjustment","Date","SKU","Item","Direction","Qty","UOM","Reason","Value","On Hand","Notes","Adjusted By"],
+    ...stockAdjustments.map(row => [
+      `<code>${finEsc(row.id)}</code>`, finEsc(row.date), finEsc(row.sku), finEsc(row.item),
+      `<span class="badge ${row.direction === "Increase" ? "ok" : "warn"}">${finEsc(row.direction)}</span>`,
+      finEsc(row.qty), finEsc(row.uom), finEsc(row.reason), money(row.value),
+      `${finEsc(row.before_qty)} → ${finEsc(row.after_qty)}`, finEsc(row.notes || "—"),
+      finEsc(row.adjusted_by || "—")
+    ])
+  ]) : "<p style='color:var(--muted);font-size:13px;'>No stock adjustments recorded.</p>";
+  addTableActions($("adjustmentTable"), "stock-adjustments");
+}
+
+$("adjustmentPost").addEventListener("click", async () => {
+  if (!can("adjustments")) { toast("Permission denied", "err"); return; }
+  if (!$("adjustmentSKU").value) { toast("Choose an item from the search results", "err"); return; }
+  const qty = Number($("adjustmentQty").value);
+  if (!Number.isFinite(qty) || qty <= 0) {
+    toast("Enter a quantity greater than zero", "err");
+    return;
+  }
+  const submit = $("adjustmentPost");
+  if (submit.disabled) return;
+  submit.disabled = true;
+  try {
+    const posted = await api("/api/stock-adjustments", {
+      method:"POST",
+      body:JSON.stringify({
+        sku:$("adjustmentSKU").value,
+        direction:$("adjustmentDirection").value,
+        qty,
+        reason:$("adjustmentReason").value,
+        notes:$("adjustmentNotes").value
+      })
+    });
+    [stockAdjustments, inventory] = await Promise.all([
+      api("/api/stock-adjustments"),
+      api("/api/items")
+    ]);
+    $("adjustmentQty").value = "1";
+    $("adjustmentNotes").value = "";
+    renderStockAdjustments();
+    renderInventory();
+    renderDashboard();
+    toast(posted.journal_id
+      ? `Stock adjustment posted · Finance journal ${posted.journal_id}`
+      : "Stock adjustment posted · no journal entry for zero cost",
+    "ok");
+  } catch (err) {
+    toast("Failed: " + err.message, "err");
+  } finally {
+    submit.disabled = false;
+  }
+});
+
 $("shrinkAdd").addEventListener("click", async () => {
   if (!can("shrink")) { toast("Permission denied", "err"); return; }
   if (!$("shrinkSKU").value) { toast("Choose an item from the search results", "err"); return; }
@@ -3048,16 +3254,18 @@ function renderItems() {
   if (locSel.options.length === 0) {
     locationMaster.forEach(l => { const o = document.createElement("option"); o.value=l.code; o.textContent=l.code; locSel.appendChild(o); });
   }
-  $("itmTable").innerHTML = table([
+  const rows = inventory.filter(i => matchesItemSearch(i, $("itmSearch").value));
+  $("itmTable").innerHTML = rows.length ? table([
     ["SKU","Name","Cat","Brand","UOM","Tax","Loc","Cost","Price","Actions"],
-    ...inventory.map(i => [
+    ...rows.map(i => [
       `<code>${finEsc(i.sku)}</code>`, finEsc(i.name),
       finEsc(getCategory(i.cat)?.name || i.cat), finEsc(getBrand(i.brand)?.name || i.brand),
       `<span class="badge purple">${finEsc(i.uom)}</span>`, `<span class="badge gold">${finEsc(i.tax)}</span>`,
       finEsc(i.location), money(i.cost), money(i.price), masterActionCell("items", i)
     ])
-  ]);
+  ]) : "<p style='color:var(--muted);font-size:13px;'>No matching items.</p>";
 }
+$("itmSearch").addEventListener("input", renderItems);
 $("itmAdd").addEventListener("click", async () => {
   if (!can("masters_edit")) return;
   const sku = $("itmSku").value.trim();

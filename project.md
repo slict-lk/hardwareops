@@ -47,6 +47,7 @@ compliance certification, or exhaustive workflow coverage.
 - ✅ Shipped — Dashboard
 - ✅ Shipped — POS
 - ✅ Shipped — Inventory
+- ✅ Shipped — Stock Adjustments
 - ✅ Shipped — Purchase Orders (PO)
 - ✅ Shipped — Goods Received Notes (GRN)
 - ✅ Shipped — Services
@@ -101,9 +102,18 @@ describe those supporting files as part of the three-file core.
 #### Inventory
 
 - ✅ Lists items alongside current stock and item master data.
+- ✅ Searches items across SKU, name, category, brand, UOM, tax, supplier,
+  location, stock, reorder point, cost, price, and last-sold date in Inventory
+  and the Items master tab.
 - ✅ Supports creating and editing items through the master-data endpoints.
 - ✅ Updates stock for sale lines, GRN lines, and shrinkage through PostgreSQL
-  triggers.
+  triggers; stock adjustments are posted transactionally through the API.
+- ✅ Records the adjustment reason, operator, and before/after on-hand quantity;
+  decrease adjustments cannot take stock below zero.
+- ✅ Cost-valued adjustments post in the same transaction to Finance: decreases
+  debit 6600 Shrinkage Expense and credit 1300 Inventory; increases debit 1300
+  Inventory and credit 4400 Other Income. Zero-cost adjustments do not create a
+  zero-value journal entry.
 - ✅ Uses item reorder points, UOM master data, location, supplier, and tax code.
 - 🚧 Multi-location stock balances are not represented: `inventory` has one
   quantity row per SKU and an item-level location.
@@ -481,7 +491,8 @@ for destructive setup.
   Never insert journal headers or lines directly from the frontend.
 - **Stock updates:** Existing triggers adjust stock on inserts to `sale_lines`,
   `grn_lines`, and `shrink_incidents`. Avoid duplicating those adjustments in
-  an API handler.
+  an API handler. The stock-adjustment endpoint is a separate workflow and
+  applies its recorded change under an inventory row lock in one transaction.
 - **Finance trigger design:** Use the existing naming style (`trg_*`) and
   coordinate source-event posting with existing uniqueness/idempotency guards.
   The current system is mixed: POS explicitly calls posting logic; GRN,
@@ -1681,6 +1692,8 @@ All Finance GET routes require `finance`; Finance mutations require
 | POST | `/rentals` | Create rental contract |
 | GET | `/shrink` | List shrink incidents |
 | POST | `/shrink` | Create shrink incident |
+| GET | `/stock-adjustments` | List stock adjustments; requires `adjustments` permission |
+| POST | `/stock-adjustments` | Post stock adjustment and balanced Finance entry when the item has non-zero cost; requires `adjustments` permission |
 
 ### 8.5 Full trigger inventory
 

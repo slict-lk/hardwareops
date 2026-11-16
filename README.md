@@ -9,7 +9,8 @@ analytics workflows with role-based access.
 
 - Dashboard with inventory, sales, VAT, low-stock, purchase-order, and receivables
   summaries
-- Point of sale, inventory management, purchase orders, and goods received notes
+- Point of sale, inventory management, stock adjustments, purchase orders, and
+  goods received notes
 - Customer credit, invoices, services, rentals, and shrinkage tracking
 - Finance CRUD for expenses, fixed assets, budgets, and bank reconciliation,
   with correcting journal entries posted on the current accounting date for
