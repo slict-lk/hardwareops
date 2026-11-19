@@ -819,6 +819,15 @@
     </div>
 
     <div class="master-view" id="master-items">
+      <div class="alert blue" style="margin-bottom:14px;">
+        <strong>Import inventory from Excel</strong>
+        <span style="display:block;margin-top:4px;">Your workbook format is supported: SKU, ITEM, CATEGORY, BRAND, UOM, QTY, REORDER, COST, SELLING PRICE, and LOCATION. This replaces the current item inventory; repeated SKUs receive a -2, -3 suffix.</span>
+        <label style="display:inline-flex;align-items:center;margin-top:10px;gap:8px;text-transform:none;letter-spacing:normal;color:var(--light);">
+          <input id="itemsExcelFile" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel">
+          <button class="btn secondary" id="itemsExcelImport" type="button">Import Excel</button>
+        </label>
+        <span id="itemsExcelStatus" style="margin-left:8px;"></span>
+      </div>
       <div class="form-row">
         <label>SKU<input type="text" id="itmSku"></label>
         <label>Item Name<input type="text" id="itmName"></label>
@@ -3266,6 +3275,41 @@ function renderItems() {
   ]) : "<p style='color:var(--muted);font-size:13px;'>No matching items.</p>";
 }
 $("itmSearch").addEventListener("input", renderItems);
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = () => reject(new Error("Unable to read the selected Excel file."));
+    reader.readAsDataURL(file);
+  });
+}
+$("itemsExcelImport").addEventListener("click", async () => {
+  if (!can("masters_edit")) return toast("Permission denied", "err");
+  const file = $("itemsExcelFile").files[0];
+  if (!file) return toast("Choose an Excel workbook first", "err");
+  const button = $("itemsExcelImport");
+  const status = $("itemsExcelStatus");
+  button.disabled = true;
+  status.textContent = "Reading workbook…";
+  try {
+    const data = await readFileAsBase64(file);
+    const result = await api("/api/items/import", {
+      method: "POST",
+      body: JSON.stringify({ filename: file.name, data })
+    });
+    await refreshInventory();
+    renderItems(); renderInventory(); renderPOSGrid(); renderDashboard();
+    status.textContent = `${result.imported} items imported`;
+    toast(result.journal_id
+      ? `Imported ${result.imported} items · Opening journal ${result.journal_id} posted`
+      : `Imported ${result.imported} items · No inventory value to post`, "ok");
+  } catch (err) {
+    status.textContent = "";
+    toast("Excel import failed: " + err.message, "err");
+  } finally {
+    button.disabled = false;
+  }
+});
 $("itmAdd").addEventListener("click", async () => {
   if (!can("masters_edit")) return;
   const sku = $("itmSku").value.trim();

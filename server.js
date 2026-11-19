@@ -2,6 +2,7 @@
 import express from "express";
 import pg from "pg";
 import cors from "cors";
+import XLSX from "xlsx";
 import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -19,7 +20,7 @@ const stockAdjustmentsSchemaKey = Symbol.for("hardwareops.stockAdjustmentsSchema
 const requestContext = new AsyncLocalStorage();
 const financeDatabaseContext = new AsyncLocalStorage();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
 app.use((req, _res, next) => {
   const requestId = req.get("x-vercel-id") || req.get("x-request-id") || randomUUID();
   req.requestId = requestId;
@@ -1647,6 +1648,213 @@ app.post("/api/items", requirePermission("inventory"), requireMasterEdit, wrap(a
     [sku,name,cat,brand,uom,tax,cost,price,reorder,location,supplier_id]);
   await q(`INSERT INTO inventory(sku,qty) VALUES ($1,0)`, [sku]);
   res.json({ sku });
+}));
+
+app.post("/api/items/import", requirePermission("inventory"), requireMasterEdit, wrap(async (req, res) => {
+  const { filename, data } = req.body || {};
+  if (typeof filename !== "string" || !/\.(xlsx|xls)$/i.test(filename)
+      || typeof data !== "string" || !data) {
+    return res.status(400).json({ error: "Select an Excel workbook (.xlsx or .xls)." });
+  }
+
+  let workbook;
+  try {
+    workbook = XLSX.read(Buffer.from(data, "base64"), { type: "buffer", cellDates: false });
+  } catch {
+    return res.status(400).json({ error: "The selected file is not a readable Excel workbook." });
+  }
+  const sheetName = workbook.SheetNames[0];
+  const sheet = sheetName && workbook.Sheets[sheetName];
+  const sourceRows = sheet ? XLSX.utils.sheet_to_json(sheet, { defval: "", raw: false }) : [];
+  if (!sourceRows.length) return res.status(400).json({ error: "The first worksheet does not contain any rows." });
+
+  const normalizeHeader = value => String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  const aliases = {
+    sku: ["sku", "itemcode", "itemsku", "code", "productcode"],
+    name: ["name", "item", "itemname", "description", "itemdescription", "productname"],
+    cat: ["category", "categorycode", "cat", "categoryname"],
+    brand: ["brand", "brandcode"],
+    uom: ["uom", "unit", "unitofmeasure", "unitmeasure"],
+    tax: ["tax", "taxcode", "vat", "vatcode"],
+    cost: ["cost", "costprice", "unitcost", "buyingprice", "purchaseprice"],
+    price: ["price", "sellingprice", "saleprice", "retailprice"],
+    reorder: ["reorder", "reorderpoint", "minimumstock", "minstock"],
+    location: ["location", "locationcode", "loc"],
+    qty: ["qty", "quantity", "stock", "onhand", "openingstock"]
+  };
+  const sourceHeaders = Object.keys(sourceRows[0]).reduce((map, header) => {
+    map[normalizeHeader(header)] = header;
+    return map;
+  }, {});
+  const headerFor = field => aliases[field].map(normalizeHeader).map(key => sourceHeaders[key]).find(Boolean);
+  const columns = Object.fromEntries(Object.keys(aliases).map(field => [field, headerFor(field)]));
+  if (!columns.sku || !columns.name || !columns.cost || !columns.price) {
+    return res.status(400).json({
+      error: "Excel must include SKU, item name, cost, and price columns."
+    });
+  }
+
+  const rows = sourceRows.map((source, index) => {
+    const value = field => String(columns[field] ? source[columns[field]] ?? "" : "").trim();
+    const numeric = field => Number(value(field).replace(/[,Rs\s]/gi, ""));
+    return {
+      row: index + 2,
+      sku: value("sku"),
+      name: value("name"),
+      cat: value("cat") || "HWD",
+      brand: value("brand") || "GEN",
+      uom: value("uom") || "EA",
+      tax: value("tax") || "VAT18",
+      cost: numeric("cost"),
+      price: numeric("price"),
+      reorder: columns.reorder ? numeric("reorder") : 10,
+      location: value("location") || "SHOP",
+      qty: columns.qty ? numeric("qty") : 0
+    };
+  });
+  const invalid = rows.find(row => !row.sku || !row.name
+    || !Number.isFinite(row.cost) || row.cost < 0
+    || !Number.isFinite(row.price) || row.price < 0
+    || !Number.isInteger(row.reorder) || row.reorder < 0
+    || !Number.isFinite(row.qty) || row.qty < 0);
+  if (invalid) {
+    return res.status(400).json({
+      error: `Invalid SKU, name, cost, price, reorder point, or quantity on Excel row ${invalid.row}.`
+    });
+  }
+  await initializeFinanceSchema();
+  const client = await connectDb();
+  try {
+    await client.query("BEGIN");
+    const checks = await client.query(`
+      SELECT
+        (SELECT COALESCE(jsonb_agg(to_jsonb(x)), '[]') FROM (SELECT code, name FROM categories) x) AS categories,
+        (SELECT COALESCE(jsonb_agg(to_jsonb(x)), '[]') FROM (SELECT code, name FROM brands) x) AS brands,
+        (SELECT COALESCE(jsonb_agg(to_jsonb(x)), '[]') FROM (SELECT code, name FROM uoms) x) AS uoms,
+        (SELECT COALESCE(jsonb_agg(to_jsonb(x)), '[]') FROM (SELECT code, name FROM tax_codes) x) AS taxes,
+        (SELECT COALESCE(jsonb_agg(to_jsonb(x)), '[]') FROM (SELECT code, name FROM locations) x) AS locations`);
+    const referenceSets = checks.rows[0];
+    const normalizeValue = value => String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+    const findReference = (references, value) => {
+      const normalized = normalizeValue(value);
+      return references.find(reference => normalizeValue(reference.code) === normalized
+        || normalizeValue(reference.name) === normalized);
+    };
+    const categoryFallbacks = new Map([
+      ["bottle", "HWD"],
+      ["tube", "HWD"]
+    ]);
+    const uomFallbacks = new Map([
+      ["pcs", "EA"], ["pieces", "EA"], ["piece", "EA"], ["nos", "EA"], ["no", "EA"],
+      ["pair", "EA"], ["pairs", "EA"], ["set", "EA"], ["box", "BOX"], ["pkt", "PKT"],
+      ["kg", "KG"], ["mtr", "M"], ["meter", "M"], ["feet", "FT"], ["ft", "FT"],
+      ["1kg", "KG"], ["2kg", "KG"], ["50mtr", "M"], ["100mtr", "M"]
+    ]);
+    const categoryBySource = value => findReference(referenceSets.categories, value)
+      || findReference(referenceSets.categories, categoryFallbacks.get(normalizeValue(value)) || "");
+    const brandBySource = value => findReference(referenceSets.brands, value);
+    const uomBySource = value => findReference(referenceSets.uoms, uomFallbacks.get(normalizeValue(value)) || value);
+    const taxBySource = value => findReference(referenceSets.taxes, value);
+    const locationBySource = value => findReference(referenceSets.locations, value);
+
+    for (const category of new Set(rows.map(row => row.cat))) {
+      if (!categoryBySource(category)) {
+        const code = normalizeValue(category).toUpperCase().slice(0, 20);
+        await client.query(`
+          INSERT INTO categories (code, name, margin) VALUES ($1, $2, 30)
+          ON CONFLICT (code) DO NOTHING`, [code, category]);
+        referenceSets.categories.push({ code, name: category });
+      }
+    }
+    for (const uom of new Set(rows.map(row => row.uom))) {
+      if (!uomBySource(uom)) {
+        const code = `IMP_${normalizeValue(uom).toUpperCase().slice(0, 16)}`;
+        await client.query(`
+          INSERT INTO uoms (code, name, base_uom, factor, decimals)
+          VALUES ($1, $2, NULL, 1, 0)
+          ON CONFLICT (code) DO NOTHING`, [code, uom]);
+        referenceSets.uoms.push({ code, name: uom });
+      }
+    }
+    for (const brand of new Set(rows.map(row => row.brand))) {
+      if (!brandBySource(brand)) {
+        const code = normalizeValue(brand).toUpperCase().slice(0, 20);
+        await client.query(`
+          INSERT INTO brands (code, name, country, warranty_months, distributor)
+          VALUES ($1, $2, '-', 0, '-')
+          ON CONFLICT (code) DO NOTHING`, [code, brand]);
+        referenceSets.brands.push({ code, name: brand });
+      }
+    }
+    for (const location of new Set(rows.map(row => row.location))) {
+      if (!locationBySource(location)) {
+        const code = normalizeValue(location).toUpperCase().slice(0, 20);
+        await client.query(`
+          INSERT INTO locations (code, name, type)
+          VALUES ($1, $2, 'Retail')
+          ON CONFLICT (code) DO NOTHING`, [code, location]);
+        referenceSets.locations.push({ code, name: location });
+      }
+    }
+    for (const row of rows) {
+      row.cat = categoryBySource(row.cat)?.code;
+      row.brand = row.brand ? brandBySource(row.brand)?.code : "GEN";
+      row.uom = uomBySource(row.uom)?.code;
+      row.tax = taxBySource(row.tax)?.code;
+      row.location = locationBySource(row.location)?.code;
+    }
+    for (const [field, label] of [["cat", "category"], ["brand", "brand"], ["uom", "UOM"], ["tax", "tax code"], ["location", "location"]]) {
+      const missing = rows.find(row => !row[field]);
+      if (missing) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ error: `Unknown ${label} on Excel row ${missing.row}.` });
+      }
+    }
+    const skuCounts = new Map();
+    for (const row of rows) {
+      const count = (skuCounts.get(row.sku) || 0) + 1;
+      skuCounts.set(row.sku, count);
+      if (count > 1) row.sku = `${row.sku}-${count}`;
+    }
+
+    await client.query("DELETE FROM inventory");
+    await client.query("DELETE FROM items");
+    for (const row of rows) {
+      await client.query(`
+        INSERT INTO items (sku, name, category_code, brand_code, uom_code, tax_code, cost, price,
+                           reorder_point, location_code, last_sold)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,CURRENT_DATE)`,
+      [row.sku, row.name, row.cat, row.brand, row.uom, row.tax, row.cost, row.price, row.reorder, row.location]);
+      await client.query("INSERT INTO inventory (sku, qty) VALUES ($1, $2)", [row.sku, row.qty]);
+    }
+    const inventoryValue = Number(rows
+      .reduce((total, row) => total + (row.qty * row.cost), 0)
+      .toFixed(2));
+    let journalId = null;
+    if (inventoryValue > 0) {
+      const { rows: journalRows } = await client.query(`
+        SELECT fn_post_journal(
+          CURRENT_DATE, $1, 'INVENTORY_IMPORT', $2, $3::jsonb, $4
+        ) AS journal_id`,
+      [
+        `Opening inventory import from ${filename}`,
+        `INVENTORY-IMPORT-${new Date().toISOString()}`,
+        JSON.stringify([
+          { account_code: "1300", debit: inventoryValue, credit: 0 },
+          { account_code: "3000", debit: 0, credit: inventoryValue }
+        ]),
+        req.user.id
+      ]);
+      journalId = journalRows[0].journal_id;
+    }
+    await client.query("COMMIT");
+    res.json({ imported: rows.length, sheet: sheetName, inventory_value: inventoryValue, journal_id: journalId });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }));
 
 /* ============================================================
