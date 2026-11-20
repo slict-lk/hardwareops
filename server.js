@@ -159,7 +159,10 @@ async function requireAuth(req, res, next) {
   } catch (err) {
     if (handleDatabaseBusy(err, req, res, "requireAuth")) return;
     console.error("Authentication lookup failed:", err);
-    res.status(500).json({ error: "Authentication service unavailable" });
+    res.set("Retry-After", "1").status(503).json({
+      error: "Authentication service temporarily unavailable",
+      code: "authentication_unavailable"
+    });
   }
 }
 
@@ -1744,16 +1747,10 @@ app.post("/api/items/import", requirePermission("inventory"), requireMasterEdit,
       ["bottle", "HWD"],
       ["tube", "HWD"]
     ]);
-    const uomFallbacks = new Map([
-      ["pcs", "EA"], ["pieces", "EA"], ["piece", "EA"], ["nos", "EA"], ["no", "EA"],
-      ["pair", "EA"], ["pairs", "EA"], ["set", "EA"], ["box", "BOX"], ["pkt", "PKT"],
-      ["kg", "KG"], ["mtr", "M"], ["meter", "M"], ["feet", "FT"], ["ft", "FT"],
-      ["1kg", "KG"], ["2kg", "KG"], ["50mtr", "M"], ["100mtr", "M"]
-    ]);
     const categoryBySource = value => findReference(referenceSets.categories, value)
       || findReference(referenceSets.categories, categoryFallbacks.get(normalizeValue(value)) || "");
     const brandBySource = value => findReference(referenceSets.brands, value);
-    const uomBySource = value => findReference(referenceSets.uoms, uomFallbacks.get(normalizeValue(value)) || value);
+    const uomBySource = value => findReference(referenceSets.uoms, value);
     const taxBySource = value => findReference(referenceSets.taxes, value);
     const locationBySource = value => findReference(referenceSets.locations, value);
 
@@ -1768,11 +1765,16 @@ app.post("/api/items/import", requirePermission("inventory"), requireMasterEdit,
     }
     for (const uom of new Set(rows.map(row => row.uom))) {
       if (!uomBySource(uom)) {
-        const code = `IMP_${normalizeValue(uom).toUpperCase().slice(0, 16)}`;
+        const baseCode = normalizeValue(uom).toUpperCase().slice(0, 20) || "UOM";
+        let code = baseCode;
+        let suffix = 2;
+        while (referenceSets.uoms.some(reference => normalizeValue(reference.code) === normalizeValue(code))) {
+          const suffixText = `_${suffix++}`;
+          code = `${baseCode.slice(0, 20 - suffixText.length)}${suffixText}`;
+        }
         await client.query(`
           INSERT INTO uoms (code, name, base_uom, factor, decimals)
-          VALUES ($1, $2, NULL, 1, 0)
-          ON CONFLICT (code) DO NOTHING`, [code, uom]);
+          VALUES ($1, $2, NULL, 1, 0)`, [code, uom]);
         referenceSets.uoms.push({ code, name: uom });
       }
     }

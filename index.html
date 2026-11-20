@@ -530,7 +530,7 @@
     </div>
     <div class="pos-wrap">
       <div class="pos-products">
-        <input id="posSearch" placeholder="🔍 Scan barcode or search SKU / name...">
+        <input id="posSearch" placeholder="🔍 Scan barcode or search SKU / name / brand...">
         <div class="pos-grid" id="posGrid"></div>
       </div>
       <div class="pos-cart">
@@ -616,7 +616,7 @@
       </label>
       <label>SKU
         <div class="searchable-select">
-          <input id="poSKUSearch" type="text" placeholder="Search SKU or item..." autocomplete="off"
+          <input id="poSKUSearch" type="text" placeholder="Search SKU, item, or brand..." autocomplete="off"
             role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="poSKUOptions">
           <select id="poSKU" hidden></select>
           <div class="searchable-options" id="poSKUOptions" role="listbox" hidden></div>
@@ -1003,7 +1003,8 @@ let sessionToken = sessionStorage.getItem("hardwareopsSession");
 async function api(path, opts = {}) {
   const headers = { "Content-Type": "application/json", ...opts.headers };
   if (sessionToken) headers.Authorization = `Bearer ${sessionToken}`;
-  const retryLimit = (opts.method || "GET").toUpperCase() === "GET" ? 2 : 0;
+  const method = (opts.method || "GET").toUpperCase();
+  const retryLimit = method === "GET" ? 2 : 1;
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(API + path, {
       ...opts,
@@ -1015,7 +1016,9 @@ async function api(path, opts = {}) {
     let payload;
     try { payload = JSON.parse(text); } catch {}
     const message = payload?.error || text || `HTTP ${res.status}`;
-    if (message === "database_busy" && attempt < retryLimit) {
+    const temporary = message === "database_busy"
+      || payload?.code === "authentication_unavailable";
+    if (temporary && attempt < retryLimit) {
       const retryAfter = res.headers.get("Retry-After");
       const retryAfterSeconds = retryAfter === null ? NaN : Number(retryAfter);
       const delay = Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0
@@ -2297,14 +2300,18 @@ function renderSalesTransactions() {
 }
 
 function renderPOSGrid() {
-  const q = $("posSearch").value.toLowerCase();
-  const rows = inventory.filter(i =>
-    !q || i.sku.toLowerCase().includes(q) || i.name.toLowerCase().includes(q)
-  );
+  const q = $("posSearch").value.trim().toLowerCase();
+  const rows = inventory.filter(i => {
+    if (!q) return true;
+    const brand = getBrand(i.brand);
+    return [i.sku, i.name, i.brand, brand?.name]
+      .some(value => String(value ?? "").toLowerCase().includes(q));
+  });
   $("posGrid").innerHTML = rows.map(i => `
     <div class="pos-item" data-sku="${finEsc(i.sku)}">
       <div class="sku">${finEsc(i.sku)} · ${finEsc(i.uom)}</div>
       <div class="name">${finEsc(i.name)}</div>
+      <div style="font-size:10px;color:var(--muted-soft);">Brand: ${finEsc(getBrand(i.brand)?.name || i.brand || "—")}</div>
       <div class="price">${money(i.price)}</div>
       <div style="font-size:10px;color:var(--muted-soft);margin-top:4px;">${finEsc(i.location)} · ${finEsc(i.qty)}</div>
     </div>
@@ -2644,9 +2651,11 @@ function renderPO() {
 
   const skuSel = $("poSKU");
   const selectedSku = skuSel.value;
-  skuSel.innerHTML = inventory.map(i =>
-    `<option value="${finEsc(i.sku)}" data-cost="${finEsc(i.cost)}">${finEsc(i.sku)} — ${finEsc(i.name)} (${finEsc(i.uom)})</option>`
-  ).join("");
+  skuSel.innerHTML = inventory.map(i => {
+    const brand = getBrand(i.brand);
+    const brandLabel = brand ? `${brand.name} (${i.brand})` : i.brand || "No brand";
+    return `<option value="${finEsc(i.sku)}" data-cost="${finEsc(i.cost)}">${finEsc(i.sku)} — ${finEsc(i.name)} (${finEsc(i.uom)}) · Brand: ${finEsc(brandLabel)}</option>`;
+  }).join("");
   if (Array.from(skuSel.options).some(option => option.value === selectedSku)) {
     skuSel.value = selectedSku;
   }
@@ -3298,6 +3307,8 @@ $("itemsExcelImport").addEventListener("click", async () => {
       body: JSON.stringify({ filename: file.name, data })
     });
     await refreshInventory();
+    uomMaster = await api("/api/uoms");
+    renderMastersDropdowns();
     renderItems(); renderInventory(); renderPOSGrid(); renderDashboard();
     status.textContent = `${result.imported} items imported`;
     toast(result.journal_id
