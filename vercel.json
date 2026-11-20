@@ -1,17 +1,3 @@
 {
-  "version": 2,
-  "functions": {
-    "api/[...path].js": {
-      "maxConcurrency": 20
-    },
-    "api/analytics/[...path].js": {
-      "maxConcurrency": 20
-    },
-    "api/finance/[...path].js": {
-      "maxConcurrency": 20
-    },
-    "api/finance/ledger/[account].js": {
-      "maxConcurrency": 20
-    }
-  }
+  "version": 2
 }

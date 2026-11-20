@@ -92,12 +92,9 @@ configuration after initial setup if it is no longer needed.
 
 ### Vercel Hobby deployment
 
-| Variable | Required | Description |
-|---|---|---|
-| `VERCEL_BETA_MAX_CONCURRENCY` | Optional platform opt-in | Set to `1` in Vercel project environment settings to opt into the beta `maxConcurrency` function setting. Review Vercel's applicable pricing and redeploy after setting it. |
+No beta-only function settings are required. The standard Hobby deployment
+uses Vercel's default function concurrency.
 
-The repository configures `maxConcurrency` as `20` in `vercel.json`. This is
-not a global limit on the number of Vercel instances or database connections.
 See [Aiven Hobbyist deployment](#aiven-hobbyist-deployment) for the connection
 limit and monitoring guidance.
 
@@ -182,32 +179,27 @@ The project can be deployed to Vercel as an Express serverless app with a web fr
    DATABASE_URL=postgresql://user:password@host:5432/hardwareops
    PGSSLMODE=require
    PG_POOL_MAX=1
-   VERCEL_BETA_MAX_CONCURRENCY=1
    AUTH_BOOTSTRAP_EMAIL=rick@store.lk
    AUTH_BOOTSTRAP_PASSWORD=replace-with-a-unique-password-of-at-least-12-characters
    ```
 
    If you use a local PostgreSQL instance or a different provider, also set `DATABASE_TARGET` and the matching `DATABASE_URL_LOCAL` / `DATABASE_URL_AIVEN` variables as needed.
 
-   On Vercel Hobby, `maxConcurrency` is a beta feature with different pricing. Opt in by setting `VERCEL_BETA_MAX_CONCURRENCY=1` in the Vercel project environment variables, then redeploy. The function configuration in `vercel.json` sets `maxConcurrency` to `20`; review Vercel's applicable pricing before opting in. This controls concurrency per function instance, not the total number of instances or total database connections.
+   No beta-only function environment variable is required. `vercel.json` does not configure `maxConcurrency`, so the deployment uses Vercel's standard Hobby concurrency behavior.
 
    `PG_POOL_MAX` defaults to `1` per warm function instance. Monitor actual database connections: serverless instance scaling means the total pool connections cannot be guaranteed from this per-instance setting alone.
 
    The API reuses one `pg.Pool` per warm function instance, caps it at `PG_POOL_MAX`, and retires idle connections after 5 seconds. Authentication schema setup is cached once per warm instance. Finance schema setup runs on first finance use and is serialized across instances to avoid concurrent schema changes. For Aiven Hobbyist, use `PG_POOL_MAX=1`: there is no PgBouncer pooler, and the PostgreSQL limit is 25 total connections.
 
-3. No custom build command is required. The Express app serves `index.html` at `/` and handles `/api/*` requests through API catch-all functions, including dedicated nested routes for analytics and finance endpoints. Do not set `PORT`; Vercel assigns function ports automatically.
+3. No custom build command is required. The Express app serves `index.html` at `/` and handles `/api/*` requests through the `api/[...path].js` catch-all function. Do not set `PORT`; Vercel assigns function ports automatically.
 4. Once the project is deployed, open the site and sign in with the configured Owner account.
 
 ## Aiven Hobbyist deployment
 
 Aiven Hobbyist supports at most 25 PostgreSQL connections and does not include
-PgBouncer. Set `PG_POOL_MAX=1` in the Vercel production environment and retain
-`maxConcurrency=20` in `vercel.json`. On Vercel Hobby, also set
-`VERCEL_BETA_MAX_CONCURRENCY=1` in the project environment and redeploy to opt
-in to the beta `maxConcurrency` setting; it has different pricing, so review
-the applicable Vercel pricing before enabling it. `maxConcurrency` is a
-per-instance request concurrency setting, not a global cap on function
-instances; the setting therefore does not guarantee a 20-connection ceiling.
+PgBouncer. Set `PG_POOL_MAX=1` in the Vercel production environment. Do not
+configure `maxConcurrency` in `vercel.json`; Vercel's default Hobby concurrency
+behavior is sufficient and does not require a beta opt-in.
 Each warm instance can hold up to `PG_POOL_MAX` database connections, so
 Vercel scaling can still exceed Aiven's 25-connection limit, including
 superuser-reserved slots and admin/migration connections. Inspect production
