@@ -6,6 +6,7 @@ import XLSX from "xlsx";
 import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createServer } from "node:http";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 import "dotenv/config";
@@ -2941,20 +2942,48 @@ let stopPromise;
 
 export async function startServer(port = process.env.PORT || 4000, host) {
   await ensureAuthSchema();
-  await new Promise((resolveListen, rejectListen) => {
-    const onError = error => {
-      httpServer = undefined;
-      rejectListen(error);
-    };
-    httpServer = host
-      ? app.listen(port, host, () => resolveListen())
-      : app.listen(port, () => resolveListen());
-    httpServer.once("error", onError);
-    httpServer.once("listening", () => httpServer.off("error", onError));
-  });
-  const address = httpServer.address();
-  console.log(`HardwareOps API listening on :${typeof address === "object" ? address.port : port}`);
-  return httpServer;
+  const server = createServer(app);
+  httpServer = server;
+  try {
+    await new Promise((resolveListen, rejectListen) => {
+      const cleanup = () => {
+        server.off("listening", onListening);
+        server.off("error", onError);
+        server.off("close", onClose);
+      };
+      const onListening = () => {
+        cleanup();
+        resolveListen();
+      };
+      const onError = error => {
+        cleanup();
+        rejectListen(error);
+      };
+      const onClose = () => {
+        cleanup();
+        rejectListen(new Error("HTTP server closed before it finished starting."));
+      };
+      server.once("listening", onListening);
+      server.once("error", onError);
+      server.once("close", onClose);
+      if (host) server.listen(port, host);
+      else server.listen(port);
+    });
+    const address = server.address();
+    if (!address) {
+      throw new Error("HTTP server started without a bound address.");
+    }
+    console.log(`HardwareOps API listening on :${typeof address === "object" ? address.port : port}`);
+    return server;
+  } catch (error) {
+    if (httpServer === server) httpServer = undefined;
+    if (server.listening) {
+      await new Promise((resolveClose, rejectClose) => {
+        server.close(closeError => closeError ? rejectClose(closeError) : resolveClose());
+      });
+    }
+    throw error;
+  }
 }
 
 export function stopServer() {
