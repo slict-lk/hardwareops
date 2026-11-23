@@ -688,6 +688,35 @@
       </label>
     </div>
     <div id="svcTable"></div>
+    <h2 style="margin-top:32px;">Warranty / Damage Returns</h2>
+    <p class="sub">Track customer items in temporary repair holding. FOC issue records the handback and does not change sellable inventory.</p>
+    <div class="form-row">
+      <label>Customer
+        <select id="warrantyCustomer"></select>
+      </label>
+      <label>Item
+        <select id="warrantySKU"></select>
+      </label>
+      <label>Reason
+        <select id="warrantyReason">
+          <option value="Warranty">Warranty</option>
+          <option value="Damage">Damage</option>
+        </select>
+      </label>
+      <label>Temporary Location
+        <input type="text" id="warrantyLocation" value="Warranty / Damage Holding" maxlength="120">
+      </label>
+      <label>Serial Number
+        <input type="text" id="warrantySerial" maxlength="120">
+      </label>
+      <label>Notes
+        <input type="text" id="warrantyNotes" maxlength="1000">
+      </label>
+      <label>&nbsp;
+        <button class="btn" id="warrantyReceive">Receive for Repair</button>
+      </label>
+    </div>
+    <div id="warrantyReturnTable"></div>
   </section>
 
   <section class="panel" id="rentals">
@@ -1154,6 +1183,7 @@ let supplierMaster = [];
 let inventory = [];
 let customers = [];
 let services = [];
+let warrantyReturns = [];
 let rentals = [];
 let shrink = [];
 let stockAdjustments = [];
@@ -1563,6 +1593,7 @@ async function bootstrap() {
     "/api/items",
     "/api/customers",
     "/api/services",
+    "/api/warranty-returns",
     "/api/rentals",
     "/api/shrink",
     "/api/invoices",
@@ -1576,7 +1607,7 @@ async function bootstrap() {
   const [
     permsData, usersData, nsData,
     uoms, taxes, cats, locs, terms, tiers, brands, sups,
-    items, custs, svcs, rents, shr, invs, pos, grnList
+    items, custs, svcs, warrantyList, rents, shr, invs, pos, grnList
   ] = data;
 
   rolePermissions     = permsData;
@@ -1593,6 +1624,7 @@ async function bootstrap() {
   inventory           = items;
   customers           = custs;
   services            = svcs;
+  warrantyReturns     = warrantyList;
   rentals             = rents;
   shrink              = shr;
   invoices            = invs;
@@ -1641,6 +1673,7 @@ async function startApp() {
 
 async function refreshInventory()  { inventory      = await api("/api/items"); }
 async function refreshCustomers()  { customers      = await api("/api/customers"); }
+async function refreshWarrantyReturns() { warrantyReturns = await api("/api/warranty-returns"); }
 async function refreshInvoices()   { invoices       = await api("/api/invoices"); }
 async function refreshPOs()        { purchaseOrders = (await api("/api/purchase-orders")).map(p => ({...p, lines: p.lines||[]})); }
 async function refreshGRNs()       { grns           = (await api("/api/grns")).map(g => ({...g, lines: g.lines||[]})); }
@@ -2984,7 +3017,106 @@ function renderServices() {
     })
   ]) : "<p style='color:var(--muted);font-size:13px;'>No tickets.</p>";
   addTableActions($("svcTable"), "service-tickets");
+  renderWarrantyReturns();
 }
+
+function renderWarrantyReturns() {
+  const customerSelect = $("warrantyCustomer");
+  const selectedCustomer = customerSelect.value;
+  customerSelect.innerHTML = `<option value="">Select customer</option>` +
+    customers.map(customer => `<option value="${customer.id}">${finEsc(customer.name)}</option>`).join("");
+  if (customers.some(customer => String(customer.id) === selectedCustomer)) {
+    customerSelect.value = selectedCustomer;
+  }
+
+  const itemSelect = $("warrantySKU");
+  const selectedSku = itemSelect.value;
+  itemSelect.innerHTML = `<option value="">Select item</option>` +
+    inventory.map(item => `<option value="${finEsc(item.sku)}">${finEsc(item.sku)} — ${finEsc(item.name)}</option>`).join("");
+  if (inventory.some(item => item.sku === selectedSku)) itemSelect.value = selectedSku;
+
+  const statusBadge = {Received:"warn", Repairing:"info", Ready:"ok", Issued:"purple"};
+  const nextStatus = {Received:"Repairing", Repairing:"Ready", Ready:"Issued"};
+  const actionLabel = {Received:"Start Repair", Repairing:"Mark Ready", Ready:"Issue FOC"};
+  $("warrantyReturnTable").innerHTML = warrantyReturns.length ? table([
+    ["Return #","Customer","Item","Serial","Reason","Temporary Location","Received","Status","Notes","Action"],
+    ...warrantyReturns.map(record => [
+      `<code>${finEsc(record.id)}</code>`,
+      finEsc(record.customer),
+      `${finEsc(record.sku)} — ${finEsc(record.item)}`,
+      finEsc(record.serialNumber || "—"),
+      finEsc(record.reason),
+      finEsc(record.holdingLocation),
+      finEsc(record.dateReceived),
+      `<span class="badge ${statusBadge[record.status] || "info"}">${finEsc(record.status)}</span>`,
+      finEsc(record.notes || "—"),
+      nextStatus[record.status]
+        ? `<button class="btn small" type="button" data-warranty-id="${finEsc(record.id)}" data-warranty-next="${nextStatus[record.status]}">${actionLabel[record.status]}</button>`
+        : `<span style="color:var(--muted-soft);font-size:12px;">FOC issued${record.issuedDate ? ` · ${finEsc(record.issuedDate)}` : ""}</span>`
+    ])
+  ]) : "<p style='color:var(--muted);font-size:13px;'>No warranty or damage returns recorded.</p>";
+
+  $("warrantyReturnTable").querySelectorAll("[data-warranty-id]").forEach(button => {
+    button.addEventListener("click", async () => {
+      const { warrantyId, warrantyNext } = button.dataset;
+      if (warrantyNext === "Issued"
+          && !confirm(`Issue ${warrantyId} back to the customer FOC? This records the handback and does not change sellable inventory.`)) {
+        return;
+      }
+      const restoreButton = startButtonProcessing(button, warrantyNext === "Issued" ? "Issuing FOC…" : "Updating…");
+      if (!restoreButton) return;
+      try {
+        await api(`/api/warranty-returns/${encodeURIComponent(warrantyId)}/status`, {
+          method:"POST",
+          body: JSON.stringify({ status: warrantyNext })
+        });
+        await refreshWarrantyReturns();
+        renderWarrantyReturns();
+        toast(warrantyNext === "Issued" ? `FOC issued for ${warrantyId}` : `${warrantyId} updated`, "ok");
+      } catch (err) {
+        toast("Warranty return update failed: " + err.message, "err");
+      } finally {
+        restoreButton();
+      }
+    });
+  });
+}
+
+$("warrantyReceive").addEventListener("click", async () => {
+  if (!can("services")) { toast("Permission denied", "err"); return; }
+  const customerId = Number($("warrantyCustomer").value);
+  const sku = $("warrantySKU").value;
+  if (!customerId || !sku) {
+    toast("Select a customer and item", "err");
+    return;
+  }
+  const submit = $("warrantyReceive");
+  const restoreSubmit = startButtonProcessing(submit, "Receiving item…");
+  if (!restoreSubmit) return;
+  try {
+    const { id } = await api("/api/warranty-returns", {
+      method:"POST",
+      body: JSON.stringify({
+        customer_id: customerId,
+        sku,
+        serial_number: $("warrantySerial").value.trim() || null,
+        holding_location: $("warrantyLocation").value.trim(),
+        reason: $("warrantyReason").value,
+        notes: $("warrantyNotes").value.trim() || null
+      })
+    });
+    await refreshWarrantyReturns();
+    $("warrantySerial").value = "";
+    $("warrantyNotes").value = "";
+    renderWarrantyReturns();
+    toast(`Return ${id} received for repair`, "ok");
+  } catch (err) {
+    toast("Unable to receive warranty return: " + err.message, "err");
+  } finally {
+    restoreSubmit();
+  }
+});
+
 $("svcAdd").addEventListener("click", async () => {
   if (!can("services")) { toast("Permission denied", "err"); return; }
   const restoreSubmit = startButtonProcessing($("svcAdd"), "Creating ticket…");

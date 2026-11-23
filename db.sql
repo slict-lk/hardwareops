@@ -139,6 +139,7 @@ INSERT INTO number_series VALUES
  ('PO','PO','2026',3003,4,'Purchase Order'),
  ('GRN','GRN','2026',4002,4,'Goods Received Note'),
  ('SRV','SRV','2026',1005,4,'Service Ticket'),
+ ('WRT','WRT','2026',1,4,'Warranty / Damage Return'),
  ('RNT','RNT','2026',5003,4,'Rental Contract'),
  ('SHR','SHR','2026',4,4,'Shrink Incident'),
  ('ADJ','ADJ','2026',1,4,'Stock Adjustment'),
@@ -471,6 +472,24 @@ CREATE TABLE service_tickets (
     price NUMERIC(14,2) NOT NULL DEFAULT 0,
     notes TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE warranty_returns (
+    id TEXT PRIMARY KEY,
+    customer_id INTEGER NOT NULL REFERENCES customers(id),
+    sku TEXT NOT NULL REFERENCES items(sku),
+    serial_number TEXT,
+    holding_location TEXT NOT NULL DEFAULT 'Warranty / Damage Holding',
+    reason TEXT NOT NULL CHECK (reason IN ('Warranty','Damage')),
+    received_date DATE NOT NULL DEFAULT CURRENT_DATE,
+    status TEXT NOT NULL DEFAULT 'Received'
+        CHECK (status IN ('Received','Repairing','Ready','Issued')),
+    ready_date DATE,
+    issued_date DATE,
+    notes TEXT,
+    received_by INTEGER REFERENCES users(id),
+    issued_by INTEGER REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ============================================================

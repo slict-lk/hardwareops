@@ -18,6 +18,7 @@ const poolKey = Symbol.for("hardwareops.postgresPool");
 const authSchemaKey = Symbol.for("hardwareops.authSchemaInitialization");
 const financeSchemaKey = Symbol.for("hardwareops.financeSchemaInitialization");
 const stockAdjustmentsSchemaKey = Symbol.for("hardwareops.stockAdjustmentsSchemaInitialization");
+const warrantyReturnsSchemaKey = Symbol.for("hardwareops.warrantyReturnsSchemaInitialization");
 const requestContext = new AsyncLocalStorage();
 const financeDatabaseContext = new AsyncLocalStorage();
 app.use(cors());
@@ -94,7 +95,8 @@ function handleDatabaseBusy(error, req, res, source) {
 }
 
 app.use("/api", (req, res, next) => {
-  ensureAuthSchema().then(() => initializeStockAdjustmentsSchema()).then(() => next()).catch(error => {
+  ensureAuthSchema().then(() => initializeStockAdjustmentsSchema())
+    .then(() => initializeWarrantyReturnsSchema()).then(() => next()).catch(error => {
     if (handleDatabaseBusy(error, req, res, "initializeApiSchema")) return;
     console.error("Failed to initialize HardwareOps API schema:", error);
     res.status(500).json({ error: "The API could not connect to its database." });
@@ -2246,6 +2248,90 @@ app.post("/api/services", requirePermission("services"), wrap(async (req,res)=>{
   res.json({ id: next_number });
 }));
 
+app.get("/api/warranty-returns", wrap(async (_req, res) => {
+  const { rows } = await q(`
+    SELECT wr.id, wr.customer_id AS "customerId", c.name AS customer,
+           wr.sku, i.name AS item, wr.serial_number AS "serialNumber",
+           wr.reason, wr.holding_location AS "holdingLocation",
+           wr.received_date AS "dateReceived", wr.status,
+           wr.ready_date AS "readyDate", wr.issued_date AS "issuedDate",
+           wr.notes, u.name AS "receivedBy"
+    FROM warranty_returns wr
+    JOIN customers c ON c.id = wr.customer_id
+    JOIN items i ON i.sku = wr.sku
+    LEFT JOIN users u ON u.id = wr.received_by
+    ORDER BY wr.received_date DESC, wr.id DESC`);
+  res.json(rows);
+}));
+
+app.post("/api/warranty-returns", requirePermission("services"), wrap(async (req, res) => {
+  const { customer_id, sku, serial_number, holding_location, reason, notes } = req.body || {};
+  if (!Number.isInteger(Number(customer_id)) || !Number(customer_id)
+      || typeof sku !== "string" || !sku.trim()
+      || typeof holding_location !== "string" || !holding_location.trim() || holding_location.length > 120
+      || !["Warranty", "Damage"].includes(reason)
+      || (serial_number != null && typeof serial_number !== "string")
+      || (serial_number != null && serial_number.length > 120)
+      || (notes != null && typeof notes !== "string")
+      || (notes != null && notes.length > 1000)) {
+    return res.status(400).json({ error: "A customer, item, temporary location, and valid return reason are required." });
+  }
+  const { rows: customerRows } = await q(`SELECT 1 FROM customers WHERE id = $1`, [Number(customer_id)]);
+  if (!customerRows.length) return res.status(400).json({ error: "Select a valid customer." });
+  const { rows: itemRows } = await q(`SELECT 1 FROM items WHERE sku = $1`, [sku.trim()]);
+  if (!itemRows.length) return res.status(400).json({ error: "Select a valid item." });
+  const { rows: [{ next_number: id }] } = await q(`SELECT fn_next_number('WRT') AS next_number`);
+  await q(`
+    INSERT INTO warranty_returns
+      (id, customer_id, sku, serial_number, holding_location, reason, notes, received_by)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+  [id, Number(customer_id), sku.trim(), serial_number?.trim() || null, holding_location.trim(), reason, notes?.trim() || null, req.user.id]);
+  res.status(201).json({ id });
+}));
+
+app.post("/api/warranty-returns/:id/status", requirePermission("services"), wrap(async (req, res) => {
+  const allowedNextStatus = {
+    Received: "Repairing",
+    Repairing: "Ready",
+    Ready: "Issued"
+  };
+  const nextStatus = req.body?.status;
+  if (!Object.values(allowedNextStatus).includes(nextStatus)) {
+    return res.status(400).json({ error: "Choose a valid warranty return status." });
+  }
+  const client = await connectDb();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(
+      `SELECT status FROM warranty_returns WHERE id = $1 FOR UPDATE`,
+      [req.params.id]
+    );
+    if (!rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Warranty return not found." });
+    }
+    if (allowedNextStatus[rows[0].status] !== nextStatus) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: `Cannot move this warranty return from ${rows[0].status} to ${nextStatus}.` });
+    }
+    await client.query(`
+      UPDATE warranty_returns
+      SET status = $2,
+          ready_date = CASE WHEN $2 = 'Ready' THEN CURRENT_DATE ELSE ready_date END,
+          issued_date = CASE WHEN $2 = 'Issued' THEN CURRENT_DATE ELSE issued_date END,
+          issued_by = CASE WHEN $2 = 'Issued' THEN $3 ELSE issued_by END
+      WHERE id = $1`,
+    [req.params.id, nextStatus, req.user.id]);
+    await client.query("COMMIT");
+    res.json({ id: req.params.id, status: nextStatus });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}));
+
 app.get("/api/rentals", wrap(async (_req,res)=>{
   const { rows } = await q(`
     SELECT r.id, r.tool_name AS tool, COALESCE(c.name,'Walk-in') AS customer,
@@ -2472,6 +2558,48 @@ function initializeStockAdjustmentsSchema() {
     });
   }
   return globalThis[stockAdjustmentsSchemaKey];
+}
+
+function initializeWarrantyReturnsSchema() {
+  if (!globalThis[warrantyReturnsSchemaKey]) {
+    globalThis[warrantyReturnsSchemaKey] = (async () => {
+      await q(`
+        CREATE TABLE IF NOT EXISTS warranty_returns (
+          id TEXT PRIMARY KEY,
+          customer_id INTEGER NOT NULL REFERENCES customers(id),
+          sku TEXT NOT NULL REFERENCES items(sku),
+          serial_number TEXT,
+          holding_location TEXT NOT NULL DEFAULT 'Warranty / Damage Holding',
+          reason TEXT NOT NULL CHECK (reason IN ('Warranty','Damage')),
+          received_date DATE NOT NULL DEFAULT CURRENT_DATE,
+          status TEXT NOT NULL DEFAULT 'Received'
+            CHECK (status IN ('Received','Repairing','Ready','Issued')),
+          ready_date DATE,
+          issued_date DATE,
+          notes TEXT,
+          received_by INTEGER REFERENCES users(id),
+          issued_by INTEGER REFERENCES users(id),
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )`);
+      await q(`ALTER TABLE warranty_returns ADD COLUMN IF NOT EXISTS holding_location TEXT`);
+      await q(`
+        UPDATE warranty_returns
+        SET holding_location = 'Warranty / Damage Holding'
+        WHERE holding_location IS NULL OR BTRIM(holding_location) = ''`);
+      await q(`
+        ALTER TABLE warranty_returns
+        ALTER COLUMN holding_location SET DEFAULT 'Warranty / Damage Holding',
+        ALTER COLUMN holding_location SET NOT NULL`);
+      await q(`
+        INSERT INTO number_series (code, prefix, year, next, pad, descr)
+        VALUES ('WRT','WRT',EXTRACT(YEAR FROM CURRENT_DATE)::TEXT,1,4,'Warranty / Damage Return')
+        ON CONFLICT (code) DO NOTHING`);
+    })().catch(error => {
+      globalThis[warrantyReturnsSchemaKey] = null;
+      throw error;
+    });
+  }
+  return globalThis[warrantyReturnsSchemaKey];
 }
 
 export function initializeFinanceSchema() {

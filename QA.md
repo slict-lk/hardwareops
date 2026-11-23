@@ -222,6 +222,13 @@ server-side access control.
 - [ ] Verify positive-price service posts one balanced `SERVICE` journal.
 - [ ] Verify zero-price service does not post a journal.
 - [ ] Confirm invalid enum status is rejected by the database.
+- [ ] Receive a customer's warranty/damage item, record its temporary location,
+  and verify it is tracked without increasing sellable inventory.
+- [ ] Progress a return from Received to Repairing to Ready; reject out-of-order
+  status transitions.
+- [ ] Issue a Ready return FOC and verify the customer, issue date, and status
+  are recorded without a sale, payment, journal, or sellable-stock movement.
+- [ ] Reject invalid customers, item SKUs, reasons, and unauthorized updates.
 
 ### Rentals
 
