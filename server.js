@@ -2114,19 +2114,73 @@ app.post("/api/purchase-orders", requirePermission("po"), wrap(async (req,res)=>
   res.json({ id });
 }));
 
+app.post("/api/purchase-orders/:id/cancel", requirePermission("po"), wrap(async (req, res) => {
+  const client = await connectDb();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(`
+      SELECT id, status FROM purchase_orders WHERE id = $1 FOR UPDATE`,
+    [req.params.id]);
+    if (!rows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Purchase order not found." });
+    }
+    if (rows[0].status === "Received" || rows[0].status === "Cancelled") {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: `Purchase order is already ${rows[0].status.toLowerCase()}.` });
+    }
+    const { rows: received } = await client.query(
+      `SELECT 1 FROM grns WHERE po_id = $1 LIMIT 1`,
+      [req.params.id]
+    );
+    if (received.length) {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: "Purchase order has received goods and cannot be cancelled." });
+    }
+    await client.query(`UPDATE purchase_orders SET status = 'Cancelled' WHERE id = $1`, [req.params.id]);
+    await client.query("COMMIT");
+    res.json({ id: req.params.id, status: "Cancelled" });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}));
+
 app.post("/api/grns", requirePermission("grn"), wrap(async (req,res)=>{
   const { po_id, notes } = req.body || {};
-  const { rows: po } = await q(`SELECT supplier_id FROM purchase_orders WHERE id=$1`, [po_id]);
-  if (!po.length) return res.status(404).json({ error: "Purchase order not found." });
-  const { rows: [{ next_number }] } = await q(`SELECT fn_next_number('GRN') AS next_number`);
-  const id = next_number;
-  await q(`INSERT INTO grns(id,po_id,supplier_id,date_received,notes,received_by)
-           VALUES ($1,$2,$3,CURRENT_DATE,$4,$5)`,
-    [id, po_id, po[0].supplier_id, notes || null, req.user.id]);
-  await q(`INSERT INTO grn_lines(grn_id,sku,qty,cost)
-           SELECT $1, sku, qty, cost FROM po_lines WHERE po_id = $2`, [id, po_id]);
-  await q(`UPDATE purchase_orders SET status='Received', received_date=CURRENT_DATE WHERE id=$1`, [po_id]);
-  res.json({ id });
+  const client = await connectDb();
+  try {
+    await client.query("BEGIN");
+    const { rows: po } = await client.query(
+      `SELECT supplier_id, status FROM purchase_orders WHERE id = $1 FOR UPDATE`,
+      [po_id]
+    );
+    if (!po.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ error: "Purchase order not found." });
+    }
+    if (po[0].status === "Cancelled" || po[0].status === "Received") {
+      await client.query("ROLLBACK");
+      return res.status(409).json({ error: `Purchase order is already ${po[0].status.toLowerCase()}.` });
+    }
+    const { rows: [{ next_number }] } = await client.query(`SELECT fn_next_number('GRN') AS next_number`);
+    const id = next_number;
+    await client.query(`INSERT INTO grns(id,po_id,supplier_id,date_received,notes,received_by)
+                        VALUES ($1,$2,$3,CURRENT_DATE,$4,$5)`,
+      [id, po_id, po[0].supplier_id, notes || null, req.user.id]);
+    await client.query(`INSERT INTO grn_lines(grn_id,sku,qty,cost)
+                        SELECT $1, sku, qty, cost FROM po_lines WHERE po_id = $2`, [id, po_id]);
+    await client.query(`UPDATE purchase_orders SET status='Received', received_date=CURRENT_DATE WHERE id=$1`, [po_id]);
+    await client.query("COMMIT");
+    res.json({ id });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }));
 
 app.get("/api/grns", wrap(async (_req,res)=>{

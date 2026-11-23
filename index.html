@@ -2746,12 +2746,16 @@ function renderPO() {
     <div class="alert blue">
       <strong>Draft PO — ${$("poSupplier").selectedOptions[0]?.textContent || "No supplier"}</strong>
       ${table([
-        ["SKU","Item","UOM","Qty","Unit Cost","Line Total"],
+        ["SKU","Item","UOM","Qty","Unit Cost","Line Total",""],
         ...draftPO.map(l => {
           const item = inventory.find(i => i.sku === l.sku);
-          return [l.sku, item?.name || "—", item?.uom || "—", l.qty, money(l.cost), money(l.qty * l.cost)];
+          return [
+            finEsc(l.sku), finEsc(item?.name || "—"), finEsc(item?.uom || "—"),
+            l.qty, money(l.cost), money(l.qty * l.cost),
+            `<button class="btn secondary small" type="button" data-po-remove="${finEsc(l.sku)}" aria-label="Remove ${finEsc(l.sku)} from PO draft">Remove</button>`
+          ];
         }),
-        ["<strong>Total</strong>","","","","",`<strong>${money(draftPO.reduce((s,l)=>s+l.qty*l.cost,0))}</strong>`]
+        ["<strong>Total</strong>","","","","",`<strong>${money(draftPO.reduce((s,l)=>s+l.qty*l.cost,0))}</strong>`,""]
       ])}
       <div style="margin-top:10px;display:flex;gap:8px;">
         <button class="btn" id="poSubmit">Submit PO</button>
@@ -2759,6 +2763,15 @@ function renderPO() {
       </div>
     </div>
   ` : "";
+
+  $("poDraft").querySelectorAll("[data-po-remove]").forEach(button => {
+    button.addEventListener("click", () => {
+      const sku = button.dataset.poRemove;
+      draftPO = draftPO.filter(line => line.sku !== sku);
+      renderPO();
+      toast(`${sku} removed from PO draft`, "ok");
+    });
+  });
 
   if ($("poSubmit")) {
     $("poSubmit").onclick = async () => {
@@ -2800,8 +2813,12 @@ function renderPO() {
     ...purchaseOrders.map(p => {
       const total = p.lines.reduce((s, l) => s + Number(l.qty) * Number(l.cost), 0);
       const badge = {Draft:"warn",Sent:"blue",Partial:"info",Received:"ok",Cancelled:"bad"}[p.status] || "info";
-      const action = p.status === "Received" ? `<span style="color:var(--muted-soft);font-size:12px;">Closed</span>`
-        : `<button class="btn small" data-receive="${p.id}">Receive →</button>`;
+      const action = p.status === "Received"
+        ? `<span style="color:var(--muted-soft);font-size:12px;">Received</span>`
+        : p.status === "Cancelled"
+          ? `<span style="color:var(--muted-soft);font-size:12px;">Cancelled</span>`
+          : `<button class="btn small" data-receive="${finEsc(p.id)}">Receive →</button>
+             <button class="btn secondary small" data-cancel-po="${finEsc(p.id)}">Cancel</button>`;
       return [`<code>${p.id}</code>`, finEsc(p.supplier), finEsc(p.date), finEsc(p.expected || "—"),
         `<button class="btn secondary small" type="button" data-po-sku-detail="${finEsc(p.id)}">SKU Detail (${p.lines.length})</button>`,
         money(total), `<span class="badge ${badge}">${finEsc(p.status)}</span>`, action];
@@ -2817,6 +2834,26 @@ function renderPO() {
         return;
       }
       showSkuDetail("PO", po.id, `${po.supplier} · ${po.date}`, po.lines);
+    });
+  });
+
+  $("poTable").querySelectorAll("[data-cancel-po]").forEach(button => {
+    button.addEventListener("click", async () => {
+      const poId = button.dataset.cancelPo;
+      if (!confirm(`Cancel purchase order ${poId}? This cannot be undone.`)) return;
+      const restoreButton = startButtonProcessing(button, "Cancelling…");
+      if (!restoreButton) return;
+      try {
+        await api(`/api/purchase-orders/${encodeURIComponent(poId)}/cancel`, { method:"POST", body:"{}" });
+        await refreshPOs();
+        renderPO();
+        renderDashboard();
+        toast(`PO ${poId} cancelled`, "ok");
+      } catch (err) {
+        toast("PO cancellation failed: " + err.message, "err");
+      } finally {
+        restoreButton();
+      }
     });
   });
 
