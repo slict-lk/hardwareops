@@ -386,15 +386,32 @@
     .tax-toggle { font-size: 11px; padding: 4px 8px; }
   }
 
-  .toast {
+  .toast-stack {
     position: fixed; bottom: 24px; right: 24px;
+    display: flex; flex-direction: column; gap: 10px;
+    z-index: 300; pointer-events: none;
+  }
+  .toast {
     background: var(--gray); border-left: 4px solid var(--orange);
-    padding: 12px 18px; border-radius: 6px; z-index: 300;
+    padding: 12px 18px; border-radius: 6px;
     font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-    max-width: 380px;
+    max-width: 380px; min-width: 220px;
+    animation: toast-in 180ms ease-out;
   }
   .toast.err { border-color: var(--red); }
   .toast.ok { border-color: var(--green); }
+  .toast.info { border-color: var(--blue); }
+  .loading-spinner {
+    display: inline-block; width: 13px; height: 13px; margin-right: 8px;
+    border: 2px solid currentColor; border-right-color: transparent;
+    border-radius: 50%; vertical-align: -2px;
+    animation: spinner-rotate 700ms linear infinite;
+  }
+  @keyframes spinner-rotate { to { transform: rotate(360deg); } }
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
   .login-screen {
     min-height: 100vh; display: grid; place-items: center; padding: 24px;
     background: radial-gradient(ellipse at top, var(--login-accent) 0, var(--dark) 60%);
@@ -1074,11 +1091,36 @@ $("signOutButton").addEventListener("click", async () => {
 });
 
 function toast(msg, kind = "ok") {
+  let stack = document.querySelector(".toast-stack");
+  if (!stack) {
+    stack = document.createElement("div");
+    stack.className = "toast-stack";
+    stack.setAttribute("aria-live", "polite");
+    stack.setAttribute("aria-atomic", "false");
+    document.body.appendChild(stack);
+  }
   const el = document.createElement("div");
   el.className = "toast " + kind;
+  el.setAttribute("role", kind === "err" ? "alert" : "status");
   el.textContent = msg;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 3200);
+  stack.appendChild(el);
+  setTimeout(() => {
+    el.remove();
+    if (!stack.children.length) stack.remove();
+  }, 3200);
+}
+
+function startButtonProcessing(button, label) {
+  if (button.disabled) return null;
+  const originalContent = button.innerHTML;
+  button.disabled = true;
+  button.setAttribute("aria-busy", "true");
+  button.innerHTML = `<span class="loading-spinner" aria-hidden="true"></span>${label}`;
+  return () => {
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
+    button.innerHTML = originalContent;
+  };
 }
 
 /* ============================================================
@@ -2387,11 +2429,27 @@ function renderCart() {
 $("posSearch").addEventListener("input", renderPOSGrid);
 $("posCustomer").addEventListener("change", renderCart);
 $("posPriceTier").addEventListener("change", renderCart);
-$("posClear").addEventListener("click", () => { cart = []; renderCart(); $("posMsg").textContent = ""; });
+$("posClear").addEventListener("click", () => {
+  if (!cart.length) { toast("Cart is already empty", "info"); return; }
+  cart = [];
+  renderCart();
+  $("posMsg").textContent = "";
+  toast("Cart cleared", "ok");
+});
 
 $("posCheckout").addEventListener("click", async () => {
-  if (!can("pos")) { $("posMsg").innerHTML = `<span style="color:var(--red);">Permission denied.</span>`; return; }
-  if (!cart.length) { $("posMsg").innerHTML = `<span style="color:var(--red);">Cart empty.</span>`; return; }
+  const checkoutButton = $("posCheckout");
+  if (checkoutButton.disabled) return;
+  if (!can("pos")) {
+    $("posMsg").innerHTML = `<span style="color:var(--red);">Permission denied.</span>`;
+    toast("Permission denied", "err");
+    return;
+  }
+  if (!cart.length) {
+    $("posMsg").innerHTML = `<span style="color:var(--red);">Cart empty.</span>`;
+    toast("Cart is empty", "err");
+    return;
+  }
 
   const custId = parseInt($("posCustomer").value) || null;
   const cust   = customers.find(c => c.id === custId);
@@ -2401,10 +2459,13 @@ $("posCheckout").addEventListener("click", async () => {
   if (payment === "On Account (B2B)") {
     if (!cust || cust.type === "B2C_DIY") {
       $("posMsg").innerHTML = `<span style="color:var(--red);">On-account requires a B2B customer.</span>`;
+      toast("On-account requires a B2B customer", "err");
       return;
     }
   }
 
+  const restoreCheckout = startButtonProcessing(checkoutButton, "Processing sale…");
+  if (!restoreCheckout) return;
   $("posMsg").innerHTML = `<span style="color:var(--muted);">Posting…</span>`;
 
   try {
@@ -2431,6 +2492,8 @@ $("posCheckout").addEventListener("click", async () => {
   } catch (err) {
     $("posMsg").innerHTML = `<span style="color:var(--red);">${err.message}</span>`;
     toast("Sale failed: " + err.message, "err");
+  } finally {
+    restoreCheckout();
   }
 });
 
@@ -2699,8 +2762,11 @@ function renderPO() {
 
   if ($("poSubmit")) {
     $("poSubmit").onclick = async () => {
+      const submit = $("poSubmit");
       const supplierId = parseInt($("poSupplier").value);
       if (!supplierId) { toast("Select supplier", "err"); return; }
+      const restoreSubmit = startButtonProcessing(submit, "Submitting PO…");
+      if (!restoreSubmit) return;
       try {
         const { id } = await api("/api/purchase-orders", {
           method:"POST",
@@ -2714,10 +2780,20 @@ function renderPO() {
         draftPO = [];
         renderPO(); renderDashboard();
         toast(`PO ${id} submitted`, "ok");
-      } catch (err) { toast("PO failed: " + err.message, "err"); }
+      } catch (err) {
+        toast("PO failed: " + err.message, "err");
+      } finally {
+        restoreSubmit();
+      }
     };
   }
-  if ($("poClearDraft")) { $("poClearDraft").onclick = () => { draftPO = []; renderPO(); }; }
+  if ($("poClearDraft")) {
+    $("poClearDraft").onclick = () => {
+      draftPO = [];
+      renderPO();
+      toast("PO draft cleared", "ok");
+    };
+  }
 
   $("poTable").innerHTML = purchaseOrders.length ? table([
     ["PO #","Supplier","Date","Expected","SKU Detail","Total","Status","Action"],
@@ -2754,7 +2830,10 @@ function renderPO() {
       window.scrollTo({top:0, behavior:"smooth"});
       setTimeout(() => {
         const sel = $("grnPO");
-        if (sel) { sel.value = poId; }
+        if (sel) {
+          sel.value = poId;
+          toast(`Ready to receive ${poId}`, "info");
+        }
       }, 60);
     };
   });
@@ -2769,6 +2848,7 @@ $("poAdd").addEventListener("click", () => {
   if (existing) existing.qty += qty;
   else draftPO.push({sku, qty, cost});
   renderPO();
+  toast(existing ? `${qty} more unit(s) added to ${sku}` : `${sku} added to PO draft`, "ok");
 });
 
 /* ============================================================
@@ -2804,8 +2884,11 @@ function renderGRN() {
 
   if ($("grnSubmit")) {
     $("grnSubmit").onclick = async () => {
+      const submit = $("grnSubmit");
       const poId = $("grnPO").value;
       if (!poId) { toast("Select PO", "err"); return; }
+      const restoreSubmit = startButtonProcessing(submit, "Posting GRN…");
+      if (!restoreSubmit) return;
       try {
         const { id } = await api("/api/grns", {
           method:"POST",
@@ -2818,7 +2901,11 @@ function renderGRN() {
         await Promise.all([refreshGRNs(), refreshPOs(), refreshInventory()]);
         renderGRN(); renderPO(); renderInventory(); renderDashboard(); renderGMROI();
         toast(`GRN ${id} posted`, "ok");
-      } catch (err) { toast("GRN failed: " + err.message, "err"); }
+      } catch (err) {
+        toast("GRN failed: " + err.message, "err");
+      } finally {
+        restoreSubmit();
+      }
     };
   }
 
@@ -2863,6 +2950,8 @@ function renderServices() {
 }
 $("svcAdd").addEventListener("click", async () => {
   if (!can("services")) { toast("Permission denied", "err"); return; }
+  const restoreSubmit = startButtonProcessing($("svcAdd"), "Creating ticket…");
+  if (!restoreSubmit) return;
   try {
     await api("/api/services", {
       method:"POST",
@@ -2877,7 +2966,11 @@ $("svcAdd").addEventListener("click", async () => {
     $("svcNotes").value = "";
     renderServices(); renderDashboard();
     toast("Service ticket created", "ok");
-  } catch (err) { toast("Failed: " + err.message, "err"); }
+  } catch (err) {
+    toast("Failed: " + err.message, "err");
+  } finally {
+    restoreSubmit();
+  }
 });
 
 /* ============================================================
@@ -3004,8 +3097,8 @@ $("adjustmentPost").addEventListener("click", async () => {
     return;
   }
   const submit = $("adjustmentPost");
-  if (submit.disabled) return;
-  submit.disabled = true;
+  const restoreSubmit = startButtonProcessing(submit, "Posting adjustment…");
+  if (!restoreSubmit) return;
   try {
     const posted = await api("/api/stock-adjustments", {
       method:"POST",
@@ -3033,13 +3126,15 @@ $("adjustmentPost").addEventListener("click", async () => {
   } catch (err) {
     toast("Failed: " + err.message, "err");
   } finally {
-    submit.disabled = false;
+    restoreSubmit();
   }
 });
 
 $("shrinkAdd").addEventListener("click", async () => {
   if (!can("shrink")) { toast("Permission denied", "err"); return; }
   if (!$("shrinkSKU").value) { toast("Choose an item from the search results", "err"); return; }
+  const restoreSubmit = startButtonProcessing($("shrinkAdd"), "Logging incident…");
+  if (!restoreSubmit) return;
   try {
     await api("/api/shrink", {
       method:"POST",
@@ -3053,7 +3148,11 @@ $("shrinkAdd").addEventListener("click", async () => {
     await Promise.all([api("/api/shrink").then(r => shrink = r), refreshInventory()]);
     renderShrink(); renderDashboard();
     toast("Shrink incident logged", "ok");
-  } catch (err) { toast("Failed: " + err.message, "err"); }
+  } catch (err) {
+    toast("Failed: " + err.message, "err");
+  } finally {
+    restoreSubmit();
+  }
 });
 
 /* ============================================================
